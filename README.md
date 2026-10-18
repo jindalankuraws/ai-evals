@@ -15,7 +15,14 @@ Compare AI models on **output quality** — not price or latency. Send one promp
 |---|---|
 | Backend | Python, FastAPI, httpx, SQLAlchemy |
 | Frontend | React, TypeScript, Vite, Tailwind CSS |
-| Model access | OpenRouter| Model access | OpenRouter| Model access | OpenRouter| Model access | OpenRouter| Model access | OpenRouter| Model access |source .venv/bin/activate
+| Model access | OpenRouter |
+
+### Backend
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # add your OpenRouter API key
 uvicorn app.main:app --reload --port 8000
