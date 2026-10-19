@@ -2,10 +2,17 @@
 
 const BACKEND_URL = "http://localhost:8000";
 
+export interface ModelPricing {
+  prompt?: string;
+  completion?: string;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
   context_length: number | null;
+  // dollars per token, straight from the OpenRouter catalog
+  pricing?: ModelPricing | null;
   supported_parameters: string[];
 }
 

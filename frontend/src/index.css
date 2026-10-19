@@ -1,1 +1,125 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 12px 32px rgb(15 23 42 / 0.07);
+}
+
+body {
+  @apply bg-slate-50 font-sans text-slate-900 antialiased;
+}
+
+/* wordmark in the top bar sits a touch tighter than normal text */
+.wordmark {
+  letter-spacing: -0.03em;
+}
+
+/* small uppercase section titles inside cards */
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b; /* slate-500 */
+}
+
+/* keyboard focus is always visible — never the browser default */
+:focus-visible {
+  outline: 2px solid #6366f1; /* indigo-500 */
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* slim scrollbars for output panes and the model dropdown */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgb(148 163 184 / 0.5);
+}
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* blinking caret while a model is still streaming.
+   Attached to the last block of the markdown body so it sits at the true
+   end of the text instead of on its own line. */
+.stream-caret > *:last-child::after {
+  content: "▍";
+  color: #6366f1;
+  margin-left: 1px;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+@keyframes caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* subtle top glow so white cards don't sit on a flat gray void */
+.page-backdrop {
+  background:
+    radial-gradient(60rem 20rem at 50% -6rem, rgb(99 102 241 / 0.05), transparent 70%),
+    #f8fafc;
+}
+
+/* ---------- markdown pane tuning ---------- */
+
+.prose-slate {
+  --tw-prose-body: #334155; /* slate-700 */
+  --tw-prose-headings: #0f172a;
+  --tw-prose-bold: #0f172a;
+  --tw-prose-code: #4f46e5; /* indigo-600 */
+  --tw-prose-pre-bg: #0f172a;
+  --tw-prose-quotes: #0f172a;
+  --tw-prose-quote-borders: #c7d2fe;
+  --tw-prose-bullets: #94a3b8;
+  --tw-prose-counters: #94a3b8;
+  --tw-prose-hr: #e2e8f0;
+  --tw-prose-th-borders: #e2e8f0;
+  --tw-prose-td-borders: #f1f5f9;
+}
+
+.prose-slate pre {
+  font-size: 13px;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.prose-slate :not(pre) > code {
+  font-size: 12.5px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #f1f5f9;
+  font-weight: 500;
+}
+
+.prose-slate table {
+  font-size: 13px;
+}
+
+/* headings inside panes stay tighter than default prose */
+.prose-slate h1,
+.prose-slate h2,
+.prose-slate h3,
+.prose-slate h4 {
+  letter-spacing: -0.015em;
+  margin-top: 1.4em;
+}
+
+.prose-slate > :first-child {
+  margin-top: 0;
+}
+
+.prose-slate img {
+  border-radius: 8px;
+}
+
