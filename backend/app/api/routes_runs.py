@@ -3,7 +3,7 @@
 Phase 2: POST /api/run takes the prompt + shared params + up to 3 models,
 fans the prompt out to all of them concurrently, and streams every answer
 back on the same response, tagged with its model id. Nothing is stored yet —
-persistence arrives with Phase 3.
+persistence arrives with Phase 7 (deferred).
 """
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
