@@ -64,17 +64,26 @@ export default function App() {
   }, [models, selected, judgeId, locked]);
 
   // a shared param is unsupported when any selected model lacks it, and
-  // "blocked" once it also holds a value — the run stays gated until then
-  const paramState = (name: keyof SharedParams): { unsupported: boolean; blocked: boolean } => {
-    const unsupported = selected.some((m) => !m.supported_parameters.includes(name));
+  // "blocked" once it also holds a value — the run stays gated until then.
+  // `missing` keeps the offender names so the warning can point at them.
+  const paramState = (name: keyof SharedParams) => {
+    const missing = selected.filter((m) => !m.supported_parameters.includes(name));
     const value = name === "temperature" ? temperature : name === "top_p" ? topP : maxTokens;
-    return { unsupported, blocked: unsupported && value.trim() !== "" };
+    return { unsupported: missing.length > 0, blocked: missing.length > 0 && value.trim() !== "", missing };
   };
 
   const temp = paramState("temperature");
   const top = paramState("top_p");
   const mt = paramState("max_tokens");
   const paramsBlocked = temp.blocked || top.blocked || mt.blocked;
+  const blockedParams = [temp, top, mt].filter((p) => p.blocked);
+
+  // "A and B" / "A, B, and C" — matches how the model chips read out names
+  function joinNames(names: string[]): string {
+    if (names.length <= 1) return names[0] ?? "";
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+  }
 
   const canRun =
     selected.length > 0 && prompt.trim() !== "" && !running && !paramsBlocked && judgeId !== null;
@@ -222,15 +231,30 @@ export default function App() {
           />
 
           <div className="mt-5 grid grid-cols-3 gap-4">
-            <ParamField label="Temperature" value={temperature} onChange={setTemperature} step={0.1} min={0} max={2} {...temp} />
-            <ParamField label="Top P" value={topP} onChange={setTopP} step={0.05} min={0} max={1} {...top} />
-            <ParamField label="Max tokens" value={maxTokens} onChange={setMaxTokens} step={64} min={1} {...mt} />
+            <ParamField label="Temperature" value={temperature} onChange={setTemperature} step={0.1} min={0} max={2} unsupported={temp.unsupported} blocked={temp.blocked} missingNames={temp.missing.map((m) => m.name)} />
+            <ParamField label="Top P" value={topP} onChange={setTopP} step={0.05} min={0} max={1} unsupported={top.unsupported} blocked={top.blocked} missingNames={top.missing.map((m) => m.name)} />
+            <ParamField label="Max tokens" value={maxTokens} onChange={setMaxTokens} step={64} min={1} unsupported={mt.unsupported} blocked={mt.blocked} missingNames={mt.missing.map((m) => m.name)} />
           </div>
 
           {paramsBlocked && (
-            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-              A highlighted parameter isn't supported by every selected model — clear it or remove that model to run.
-            </p>
+            <div className="mt-3 space-y-1.5">
+              {blockedParams.map((p) => {
+                const names = p.missing.map((m) => m.name);
+                const label =
+                  p === temp ? "Temperature" : p === top ? "Top P" : "Max tokens";
+                const who = names.length === 1 ? "that model" : "those models";
+                return (
+                  <p
+                    key={label}
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600"
+                  >
+                    {label} has a value, but {joinNames(names)}{" "}
+                    {names.length === 1 ? "doesn't" : "don't"} support it — clear it or remove{" "}
+                    {who} to run.
+                  </p>
+                );
+              })}
+            </div>
           )}
 
           <p className="section-title mb-3 mt-5">Judge</p>

@@ -10,6 +10,7 @@ export default function ParamField({
   max,
   unsupported,
   blocked,
+  missingNames,
 }: {
   label: string;
   value: string;
@@ -19,6 +20,7 @@ export default function ParamField({
   max?: number;
   unsupported: boolean;
   blocked: boolean;
+  missingNames: string[];
 }) {
   return (
     <label className={`block ${unsupported ? "opacity-50" : ""}`}>
@@ -33,7 +35,7 @@ export default function ParamField({
         max={max}
         onChange={(e) => onChange(e.target.value)}
         placeholder="default"
-        title={unsupported ? "Not supported by one or more selected models" : undefined}
+        title={unsupported ? `Not supported by ${missingNames.join(", ")}` : undefined}
         className={`w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none transition-colors placeholder:text-slate-400 focus:ring-2 ${
           blocked
             ? "border-red-400 focus:border-red-500 focus:ring-red-500/15"
