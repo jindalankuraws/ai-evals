@@ -34,15 +34,19 @@ async def get_catalog() -> list[dict]:
         output = architecture.get("output_modalities") or ["text"]
         if "text" not in output:
             continue  # skip image/audio generators — this app compares text answers
+        if (m.get("id") or "").endswith(":batch"):
+            continue  # skip batch variants — not selectable for live comparison
         models.append({
             "id": m.get("id"),
             "name": m.get("name"),
+            "created": m.get("created"),
             "context_length": m.get("context_length"),
             "pricing": m.get("pricing"),
             "supported_parameters": m.get("supported_parameters") or [],
         })
 
-    models.sort(key=lambda m: (m["name"] or "").lower())
+    # newest releases first so the freshest models sit at the top of the picker
+    models.sort(key=lambda m: m.get("created") or 0, reverse=True)
     _cache["models"] = models
     _cache["fetched_at"] = now
     return models
