@@ -34,11 +34,62 @@ export interface RunInput {
   prompt: string;
   system_prompt: string;
   params: SharedParams;
+  judge_model: string;
+}
+
+// --- judge evaluation -------------------------------------------------------
+// Mirrors the dict returned by POST /api/runs/{id}/evaluate (see
+// backend/app/engine/judge/evaluator.py). Scores are comparative and blind:
+// each model gets a letter (A/B/C) that only maps back to a model id server-side.
+
+// one model's score on one metric
+export interface MetricScore {
+  letter: string; // blind letter the judge saw (A/B/C)
+  score: number; // raw 1-5
+  normalized: number; // (score-1)/4 → 0-1
+  rationale: string;
+}
+
+// one metric's verdict across all compared models
+export interface MetricResult {
+  label: string;
+  weight: number;
+  status: "ok" | "inference_error";
+  error?: string; // only when status is inference_error
+  scores?: Record<string, MetricScore>; // model_id -> score; absent on inference_error
+}
+
+// one row of the weighted overall table, sorted best-first
+export interface OverallEntry {
+  model_id: string;
+  letter: string;
+  weighted_score: number; // 0-1, weight-averaged over scored metrics
+}
+
+// the masked pairwise call that decides a 0.15-band tie
+export interface TieBreak {
+  winner: string | null; // model id; null when the tie-break call failed
+  rationale: string | null;
+  error: string | null;
+  presentation_order: string[]; // the randomized order the judge saw
+}
+
+export interface EvaluationResult {
+  run_id: string;
+  judge_model: string;
+  letters: Record<string, string>; // letter -> model_id
+  metrics: Record<string, MetricResult>;
+  overall: OverallEntry[];
+  winner: string;
+  tie_break: TieBreak | null;
 }
 
 // One run streams several models over a single response. Every SSE event is
 // tagged with the model it belongs to, so the UI routes it to the right pane.
+// The stream opens with a `run` event carrying the run_id — the frontend
+// keeps it so it can trigger the evaluate call once the stream ends.
 export interface RunHandlers {
+  onRunStart: (runId: string) => void;
   onToken: (modelId: string, text: string) => void;
   onDone: (modelId: string, result: RunResult) => void;
   // an empty modelId means the failure is about the whole run, not one model
@@ -61,6 +112,25 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   const body = await res.json();
   return body.models as ModelInfo[];
 }
+
+// Ask the backend to judge a finished run. The endpoint is fire-once: after
+// the first call the verdict is cached, so a repeat (accidental double-click,
+// React StrictMode remount) gets the same result back instead of a re-judge.
+export async function evaluateRun(runId: string): Promise<EvaluationResult> {
+  const res = await fetch(`${BACKEND_URL}/api/runs/${runId}/evaluate`, { method: "POST" });
+  if (!res.ok) {
+    let detail = `Evaluation failed (HTTP ${res.status})`;
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // keep the status-code message
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<EvaluationResult>;
+}
+
 
 // One request per run: the answers stream back on the same response body as
 // SSE-formatted messages. We read it with a plain reader because EventSource
@@ -111,7 +181,9 @@ export async function streamRun(input: RunInput, handlers: RunHandlers): Promise
     }
     const modelId = String(payload.model_id ?? "");
     if (modelId) seen.add(modelId);
-    if (name === "token") {
+    if (name === "run") {
+      handlers.onRunStart(String(payload.run_id ?? ""));
+    } else if (name === "token") {
       handlers.onToken(modelId, String(payload.text ?? ""));
     } else if (name === "done") {
       settled.add(modelId);

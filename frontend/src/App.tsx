@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  evaluateRun,
   fetchModels,
   streamRun,
   RunConflictError,
+  type EvaluationResult,
   type ModelInfo,
   type SharedParams,
 } from "./api";
+import JudgePicker from "./components/JudgePicker";
 import ModelPicker from "./components/ModelPicker";
 import OutputPane, { type PaneState } from "./components/OutputPane";
 import ParamField from "./components/ParamField";
 import { MAX_MODELS } from "./lib/models";
+import { eligibleJudges, pickJudge } from "./lib/judge";
 
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -26,6 +30,15 @@ export default function App() {
   const [panes, setPanes] = useState<Record<string, PaneState>>({});
   const [banner, setBanner] = useState<string | null>(null);
 
+  // judge + evaluation — the judge is bound to the run at trigger time and
+  // the evaluate call fires exactly once when the stream ends (fire-once on
+  // the backend, so a StrictMode double-invoke can't re-spend tokens)
+  const [judgeId, setJudgeId] = useState<string | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
+  const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [evalNote, setEvalNote] = useState<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
+
   const scrollRefs = useRef(new Map<string, HTMLDivElement | null>());
   const setScrollRef = useCallback((id: string, el: HTMLDivElement | null) => {
     scrollRefs.current.set(id, el);
@@ -37,6 +50,18 @@ export default function App() {
       .then(setModels)
       .catch((e: Error) => setLoadError(e.message));
   }, []);
+
+  // auto-preselect the judge whenever the lineup changes — eligibility depends
+  // on the compared families, so a manual pick survives only while it stays
+  // eligible. Locked while a run or evaluation is in flight.
+  const locked = running || evaluating;
+  useEffect(() => {
+    if (locked) return;
+    const ids = selected.map((m) => m.id);
+    if (!judgeId || !eligibleJudges(models, ids).some((m) => m.id === judgeId)) {
+      setJudgeId(pickJudge(models, ids)?.id ?? null);
+    }
+  }, [models, selected, judgeId, locked]);
 
   // a shared param is unsupported when any selected model lacks it, and
   // "blocked" once it also holds a value — the run stays gated until then
@@ -51,17 +76,44 @@ export default function App() {
   const mt = paramState("max_tokens");
   const paramsBlocked = temp.blocked || top.blocked || mt.blocked;
 
-  const canRun = selected.length > 0 && prompt.trim() !== "" && !running && !paramsBlocked;
+  const canRun =
+    selected.length > 0 && prompt.trim() !== "" && !running && !paramsBlocked && judgeId !== null;
 
   const autoScroll = (modelId: string) => {
     const el = scrollRefs.current.get(modelId);
     if (el) el.scrollTop = el.scrollHeight;
   };
 
+  // auto-evaluate exactly once per run — fired when the stream settles, with
+  // the run_id captured from the opening `run` event. Fire-once on the
+  // backend, so an accidental repeat returns the cached verdict.
+  async function autoEvaluate(runId: string) {
+    setEvaluating(true);
+    setEvalNote(null);
+    try {
+      const result = await evaluateRun(runId);
+      setEvaluation(result);
+      const failed = Object.values(result.metrics).filter((m) => m.status === "inference_error");
+      if (failed.length > 0) {
+        setEvalNote(
+          `Partial evaluation — ${failed.map((m) => m.label).join(", ")} could not be scored` +
+            ` (${failed.map((m) => m.error ?? "judge error").join("; ")}). The overall is weight-averaged over the scored metrics.`,
+        );
+      }
+    } catch (err) {
+      setEvalNote(`Evaluation failed — ${(err as Error).message} A fresh run is the only path.`);
+    } finally {
+      setEvaluating(false);
+    }
+  }
+
   async function handleRun() {
-    if (!canRun) return;
+    if (!canRun || !judgeId) return;
     setRunning(true);
     setBanner(null);
+    setEvaluation(null);
+    setEvalNote(null);
+    runIdRef.current = null;
     // fresh panes for this run; the grid keeps the new lineup right away
     setPanes(Object.fromEntries(selected.map((m) => [m.id, { status: "streaming", text: "" }])));
 
@@ -74,8 +126,17 @@ export default function App() {
 
     try {
       await streamRun(
-        { model_ids: selected.map((m) => m.id), prompt, system_prompt: systemPrompt, params },
         {
+          model_ids: selected.map((m) => m.id),
+          prompt,
+          system_prompt: systemPrompt,
+          params,
+          judge_model: judgeId,
+        },
+        {
+          onRunStart: (runId) => {
+            runIdRef.current = runId;
+          },
           onToken: (modelId, text) => {
             setPanes((prev) => {
               const pane = prev[modelId];
@@ -109,6 +170,9 @@ export default function App() {
       }
     } finally {
       setRunning(false);
+      // the stream has settled — the run is complete on the backend, so the
+      // single evaluate call fires now (exactly once per run)
+      if (runIdRef.current) void autoEvaluate(runIdRef.current);
     }
   }
 
@@ -169,6 +233,15 @@ export default function App() {
             </p>
           )}
 
+          <p className="section-title mb-3 mt-5">Judge</p>
+          <JudgePicker
+            models={models}
+            selectedIds={selected.map((m) => m.id)}
+            judgeId={judgeId}
+            onChange={setJudgeId}
+            disabled={locked}
+          />
+
           <div className="mt-5 flex items-center gap-3">
             <button
               type="button"
@@ -203,10 +276,30 @@ export default function App() {
             <p className="section-title">Results</p>
             {selected.length > 0 && (
               <p className="text-xs text-slate-400">
-                {running ? "Streaming…" : Object.keys(panes).length > 0 ? "Latest run" : "Ready"}
+                {running
+                  ? "Streaming…"
+                  : evaluating
+                    ? "Evaluating responses…"
+                    : evaluation
+                      ? `Judged by ${evaluation.judge_model.split("/")[1] ?? evaluation.judge_model}`
+                      : Object.keys(panes).length > 0
+                        ? "Latest run"
+                        : "Ready"}
               </p>
             )}
           </div>
+
+          {/* judge banners — partial / failed / tie-break, no retry buttons */}
+          {evalNote && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs leading-5 text-amber-800">
+              {evalNote}
+            </div>
+          )}
+          {evaluation?.tie_break?.winner && (
+            <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs leading-5 text-indigo-800">
+              Tie at the 0.15 band — decided by a masked head-to-head: {evaluation.tie_break.rationale}
+            </div>
+          )}
           {selected.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-16 text-center">
               <p className="text-sm font-medium text-slate-500">No models selected</p>
@@ -222,9 +315,32 @@ export default function App() {
                     : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
               }`}
             >
-              {selected.map((m) => (
-                <OutputPane key={m.id} model={m} pane={panes[m.id]} scrollRef={(el) => setScrollRef(m.id, el)} />
-              ))}
+              {selected.map((m) => {
+                const entry = evaluation?.overall.find((o) => o.model_id === m.id);
+                const metrics = evaluation
+                  ? Object.values(evaluation.metrics)
+                      .filter((metric) => metric.scores && metric.scores[m.id])
+                      .map((metric) => ({
+                        label: metric.label,
+                        score: metric.scores![m.id].score,
+                        normalized: metric.scores![m.id].normalized,
+                        rationale: metric.scores![m.id].rationale,
+                      }))
+                  : null;
+                return (
+                  <OutputPane
+                    key={m.id}
+                    model={m}
+                    pane={panes[m.id]}
+                    scrollRef={(el) => setScrollRef(m.id, el)}
+                    overall={entry ? entry.weighted_score : null}
+                    letter={entry ? entry.letter : null}
+                    isWinner={evaluation?.winner === m.id}
+                    metrics={metrics}
+                    evaluating={evaluating}
+                  />
+                );
+              })}
             </div>
           )}
         </section>
