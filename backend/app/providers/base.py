@@ -35,6 +35,18 @@ class StreamEvent:
     error: Optional[str] = None
 
 
+@dataclass
+class Completion:
+    """One settled, non-streamed completion — what the judge engine consumes."""
+
+    text: str = ""
+    finish_reason: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    latency_ms: int | None = None
+    error: str | None = None
+
+
 class ProviderAdapter(ABC):
     """A provider knows how to stream one completion for one model."""
 
@@ -47,4 +59,22 @@ class ProviderAdapter(ABC):
         params: SharedParams,
     ) -> AsyncIterator[StreamEvent]:
         """Yield StreamEvents until the completion finishes or errors."""
+        ...
+
+    @abstractmethod
+    async def complete(
+        self,
+        model_id: str,
+        prompt: str,
+        system_prompt: str,
+        params: SharedParams,
+        response_format: dict | None = None,
+    ) -> Completion:
+        """One settled completion in a single call.
+
+        The judge engine uses this instead of streaming: verdicts are read
+        whole and parsed as JSON. response_format, when given, is the
+        provider's structured-output constraint (OpenRouter's json_schema
+        response_format) — pass None for plain text.
+        """
         ...

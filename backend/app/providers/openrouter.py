@@ -6,7 +6,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.core.config import settings
-from app.providers.base import ProviderAdapter, SharedParams, StreamEvent
+from app.providers.base import Completion, ProviderAdapter, SharedParams, StreamEvent
 
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -98,3 +98,59 @@ class OpenRouterAdapter(ProviderAdapter):
                     )
         except httpx.HTTPError as exc:
             yield StreamEvent(kind="error", error="Connection to OpenRouter failed: %s" % exc)
+
+    async def complete(
+        self,
+        model_id: str,
+        prompt: str,
+        system_prompt: str,
+        params: SharedParams,
+        response_format: dict | None = None,
+    ) -> Completion:
+        """One non-streamed completion; the judge engine's path into OpenRouter."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        body = {"model": model_id, "messages": messages}
+        if params.temperature is not None:
+            body["temperature"] = params.temperature
+        if params.top_p is not None:
+            body["top_p"] = params.top_p
+        if params.max_tokens is not None:
+            body["max_tokens"] = params.max_tokens
+        if response_format is not None:
+            body["response_format"] = response_format
+
+        headers = {}
+        if settings.openrouter_api_key:
+            headers["Authorization"] = "Bearer " + settings.openrouter_api_key
+
+        started = time.perf_counter()
+        try:
+            timeout = httpx.Timeout(300.0, connect=15.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(CHAT_URL, json=body, headers=headers)
+                if resp.status_code != 200:
+                    return Completion(
+                        error="OpenRouter returned HTTP %d: %s" % (resp.status_code, resp.text[:300])
+                    )
+                data = resp.json()
+                if data.get("error"):
+                    err = data["error"]
+                    return Completion(error=err.get("message", str(err)))
+                choices = data.get("choices") or []
+                if not choices:
+                    return Completion(error="OpenRouter returned no choices")
+                message = choices[0].get("message") or {}
+                usage = data.get("usage") or {}
+                return Completion(
+                    text=message.get("content") or "",
+                    finish_reason=choices[0].get("finish_reason"),
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
+        except httpx.HTTPError as exc:
+            return Completion(error="Connection to OpenRouter failed: %s" % exc)

@@ -1,0 +1,86 @@
+"""In-memory run store — the Phase 4a stand-in for Phase 7's SQLite tables.
+
+A run record captures everything the judge will later need: the exact prompt
+and params, the judge bound at trigger time, and each model's full response
+as it settles during the stream. Records live for the process lifetime only;
+the Phase 7 swap to SQLite keeps the same shape.
+"""
+import time
+import uuid
+from dataclasses import dataclass, field
+
+# keep memory bounded — oldest runs fall off the end once the cap is hit
+MAX_RUNS = 200
+
+
+@dataclass
+class ModelResult:
+    """One compared model's answer, accumulated while the run streams."""
+
+    model_id: str
+    text: str = ""
+    finish_reason: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    latency_ms: int | None = None
+    error: str | None = None
+
+
+@dataclass
+class RunRecord:
+    """Everything about one comparison run, keyed by its run id."""
+
+    run_id: str
+    prompt: str
+    system_prompt: str
+    params: dict
+    model_ids: list[str]
+    judge_model: str
+    created_at: float
+    results: dict = field(default_factory=dict)  # model_id -> ModelResult
+    status: str = "streaming"  # streaming | complete
+    evaluation: dict | None = None  # cached fire-once verdict (Phase 4c)
+    evaluating: bool = False  # True while a judge call is in flight
+
+    def result_for(self, model_id: str) -> ModelResult:
+        """Return (and lazily create) the result slot for one model."""
+        if model_id not in self.results:
+            self.results[model_id] = ModelResult(model_id=model_id)
+        return self.results[model_id]
+
+
+class RunStore:
+    """Process-wide store; replaced by the Phase 7 SQLAlchemy repo."""
+
+    def __init__(self) -> None:
+        self._runs: dict[str, RunRecord] = {}
+
+    def create(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str,
+        params: dict,
+        model_ids: list[str],
+        judge_model: str,
+    ) -> RunRecord:
+        record = RunRecord(
+            run_id=uuid.uuid4().hex[:12],
+            prompt=prompt,
+            system_prompt=system_prompt,
+            params=params,
+            model_ids=list(model_ids),
+            judge_model=judge_model,
+            created_at=time.time(),
+        )
+        self._runs[record.run_id] = record
+        while len(self._runs) > MAX_RUNS:
+            oldest = min(self._runs, key=lambda rid: self._runs[rid].created_at)
+            del self._runs[oldest]
+        return record
+
+    def get(self, run_id: str) -> RunRecord | None:
+        return self._runs.get(run_id)
+
+
+store = RunStore()
