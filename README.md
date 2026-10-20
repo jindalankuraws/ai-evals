@@ -1,6 +1,6 @@
 # AI Evals
 
-Compare AI models on **output quality** — not price or latency. Send one prompt to several models under an identical inference configuration, watch the responses stream in side by side, and let an LLM-as-judge score each answer on metrics like correctness, groundedness and helpfulness.
+Compare AI models on **output quality** — not price or latency. Send one prompt to several models under an identical inference configuration, watch the responses stream in side by side, and let an LLM-as-judge score every answer on five fixed metrics — correctness, instruction-following, helpfulness, clarity and conciseness — then highlight the strongest response.
 
 ## What it does
 
