@@ -9,7 +9,7 @@ import {
   type SharedParams,
 } from "./api";
 import JudgePicker from "./components/JudgePicker";
-import ModelPicker from "./components/ModelPicker";
+import ModelSlotPicker from "./components/ModelSlotPicker";
 import OutputPane, { type PaneState } from "./components/OutputPane";
 import ParamField from "./components/ParamField";
 import { MAX_MODELS } from "./lib/models";
@@ -18,7 +18,16 @@ import { eligibleJudges, pickJudge } from "./lib/judge";
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<ModelInfo[]>([]);
+  // the comparison is three independent slots; a slot can stay empty, so any
+  // mix works — same model on different providers, or different models on
+  // one provider. The same model id can't sit in two slots at once.
+  const [slots, setSlots] = useState<(ModelInfo | null)[]>(() =>
+    Array.from({ length: MAX_MODELS }, () => null),
+  );
+  const selected = slots.filter((m): m is ModelInfo => m !== null);
+  const setSlot = (index: number, model: ModelInfo | null) => {
+    setSlots((prev) => prev.map((s, i) => (i === index ? model : s)));
+  };
 
   const [prompt, setPrompt] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -61,7 +70,7 @@ export default function App() {
     if (!judgeId || !eligibleJudges(models, ids).some((m) => m.id === judgeId)) {
       setJudgeId(pickJudge(models, ids)?.id ?? null);
     }
-  }, [models, selected, judgeId, locked]);
+  }, [models, slots, judgeId, locked]);
 
   // a shared param is unsupported when any selected model lacks it, and
   // "blocked" once it also holds a value — the run stays gated until then.
@@ -210,9 +219,7 @@ export default function App() {
 
         {/* prompt + params card */}
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
-          <p className="section-title mb-3">Models</p>
-          <ModelPicker models={models} selected={selected} onAdd={(m) => setSelected((prev) => [...prev, m])} onRemove={(id) => setSelected((prev) => prev.filter((m) => m.id !== id))} />
-          <p className="section-title mb-3 mt-5">Prompt</p>
+          <p className="section-title mb-3">Prompt</p>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -284,8 +291,8 @@ export default function App() {
             </button>
             <span className="text-xs text-slate-400">
               {selected.length === 0
-                ? "Pick at least one model to enable the run"
-                : `${selected.length} of ${MAX_MODELS} models selected`}
+                ? "Fill at least one slot to enable the run"
+                : `${selected.length} of ${MAX_MODELS} slots filled`}
             </span>
           </div>
         </section>
@@ -324,49 +331,50 @@ export default function App() {
               Tie at the 0.15 band — decided by a masked head-to-head: {evaluation.tie_break.rationale}
             </div>
           )}
-          {selected.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-6 py-16 text-center">
-              <p className="text-sm font-medium text-slate-500">No models selected</p>
-              <p className="mt-1 text-xs text-slate-400">Use the picker above to choose up to {MAX_MODELS} models.</p>
-            </div>
-          ) : (
-            <div
-              className={`grid gap-4 ${
-                selected.length === 1
-                  ? "grid-cols-1"
-                  : selected.length === 2
-                    ? "grid-cols-1 md:grid-cols-2"
-                    : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-              }`}
-            >
-              {selected.map((m) => {
-                const entry = evaluation?.overall.find((o) => o.model_id === m.id);
-                const metrics = evaluation
-                  ? Object.values(evaluation.metrics)
-                      .filter((metric) => metric.scores && metric.scores[m.id])
-                      .map((metric) => ({
-                        label: metric.label,
-                        score: metric.scores![m.id].score,
-                        normalized: metric.scores![m.id].normalized,
-                        rationale: metric.scores![m.id].rationale,
-                      }))
-                  : null;
+          {/* one card per slot — empty slots show the picker, filled slots show
+              the output (or an add-someone-here card before the first run) */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {slots.map((m, i) => {
+              const entry = evaluation?.overall.find((o) => o.model_id === m?.id);
+              const metrics = evaluation && m
+                ? Object.values(evaluation.metrics)
+                    .filter((metric) => metric.scores && metric.scores[m.id])
+                    .map((metric) => ({
+                      label: metric.label,
+                      score: metric.scores![m.id].score,
+                      normalized: metric.scores![m.id].normalized,
+                      rationale: metric.scores![m.id].rationale,
+                    }))
+                : null;
+              if (m === null) {
                 return (
-                  <OutputPane
-                    key={m.id}
-                    model={m}
-                    pane={panes[m.id]}
-                    scrollRef={(el) => setScrollRef(m.id, el)}
-                    overall={entry ? entry.weighted_score : null}
-                    letter={entry ? entry.letter : null}
-                    isWinner={evaluation?.winner === m.id}
-                    metrics={metrics}
-                    evaluating={evaluating}
+                  <ModelSlotPicker
+                    key={`slot-${i}`}
+                    models={models}
+                    takenIds={slots.flatMap((s) => (s ? [s.id] : []))}
+                    onPick={(model) => setSlot(i, model)}
+                    disabled={locked}
                   />
                 );
-              })}
-            </div>
-          )}
+              }
+              return (
+                <OutputPane
+                  key={`${m.id}-${i}`}
+                  model={m}
+                  pane={panes[m.id]}
+                  scrollRef={(el) => setScrollRef(m.id, el)}
+                  overall={entry ? entry.weighted_score : null}
+                  letter={entry ? entry.letter : null}
+                  isWinner={evaluation?.winner === m.id}
+                  metrics={metrics}
+                  evaluating={evaluating}
+                  onClear={
+                    Object.keys(panes).length === 0 ? () => setSlot(i, null) : undefined
+                  }
+                />
+              );
+            })}
+          </div>
         </section>
       </main>
     </div>

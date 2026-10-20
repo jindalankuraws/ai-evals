@@ -66,6 +66,7 @@ export default function OutputPane({
   isWinner,
   metrics,
   evaluating,
+  onClear,
 }: {
   model: ModelInfo;
   pane?: PaneState;
@@ -75,6 +76,8 @@ export default function OutputPane({
   isWinner?: boolean;
   metrics?: PaneMetric[] | null;
   evaluating?: boolean;
+  // removes this model from its comparison slot; hidden while streaming
+  onClear?: () => void;
 }) {
   const price = pricingLabel(model);
   return (
@@ -108,6 +111,17 @@ export default function OutputPane({
           >
             {overall.toFixed(2)}
           </span>
+        )}
+        {onClear && pane?.status !== "streaming" && (
+          <button
+            type="button"
+            onClick={onClear}
+            title="Remove this model from the comparison"
+            aria-label={`Remove ${model.name}`}
+            className="shrink-0 cursor-pointer rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            ✕
+          </button>
         )}
         <StatusPill status={pane?.status ?? "idle"} />
       </header>
