@@ -9,11 +9,30 @@ export interface ModelPricing {
 
 export interface ModelInfo {
   id: string;
+  // which inference provider serves this model (openai/anthropic/openrouter/…)
+  provider: string;
   name: string;
   context_length: number | null;
-  // dollars per token, straight from the OpenRouter catalog
+  // dollars per token, straight from the provider catalog
   pricing?: ModelPricing | null;
   supported_parameters: string[];
+}
+
+// one row of GET /api/providers - what the picker needs to render the
+// provider step, including the setup hint shown for unconfigured rows
+export interface ProviderInfo {
+  slug: string;
+  label: string;
+  api_key_env: string;
+  hint: string;
+  configured: boolean;
+}
+
+export async function fetchProviders(): Promise<ProviderInfo[]> {
+  const res = await fetch(`${BACKEND_URL}/api/providers`);
+  if (!res.ok) throw new Error(`Providers request failed (HTTP ${res.status})`);
+  const body = await res.json();
+  return body.providers as ProviderInfo[];
 }
 
 export interface SharedParams {
@@ -86,7 +105,7 @@ export interface EvaluationResult {
 
 // One run streams several models over a single response. Every SSE event is
 // tagged with the model it belongs to, so the UI routes it to the right pane.
-// The stream opens with a `run` event carrying the run_id — the frontend
+// The stream opens with a `run` event carrying the run_id - the frontend
 // keeps it so it can trigger the evaluate call once the stream ends.
 export interface RunHandlers {
   onRunStart: (runId: string) => void;
@@ -97,7 +116,7 @@ export interface RunHandlers {
 }
 
 // Thrown when the backend rejects a run because a shared param isn't
-// supported by every selected model — the "apple-to-apple" gate.
+// supported by every selected model - the "apple-to-apple" gate.
 export class RunConflictError extends Error {
   conflicts: string[];
   constructor(conflicts: string[]) {
@@ -106,11 +125,25 @@ export class RunConflictError extends Error {
   }
 }
 
-export async function fetchModels(): Promise<ModelInfo[]> {
+// per-provider catalog fetch result from /api/models - explains why a
+// configured provider can still show zero models (rejected key, timeout, ...)
+export interface ProviderFetchStatus {
+  state: "ok" | "failed" | "unconfigured";
+  model_count: number;
+  error: string | null;
+}
+
+export async function fetchModels(): Promise<{
+  models: ModelInfo[];
+  providerStatus: Record<string, ProviderFetchStatus>;
+}> {
   const res = await fetch(`${BACKEND_URL}/api/models`);
   if (!res.ok) throw new Error(`Could not load models (HTTP ${res.status})`);
   const body = await res.json();
-  return body.models as ModelInfo[];
+  return {
+    models: body.models as ModelInfo[],
+    providerStatus: (body.provider_status ?? {}) as Record<string, ProviderFetchStatus>,
+  };
 }
 
 // Ask the backend to judge a finished run. The endpoint is fire-once: after
@@ -135,6 +168,16 @@ export async function evaluateRun(runId: string): Promise<EvaluationResult> {
 // One request per run: the answers stream back on the same response body as
 // SSE-formatted messages. We read it with a plain reader because EventSource
 // only supports GET, which doesn't fit a POST.
+// SSE blocks carry their payload as a JSON data line; a malformed one is
+// skipped rather than treated as an error.
+function parsePayload(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export async function streamRun(input: RunInput, handlers: RunHandlers): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/api/run`, {
     method: "POST",
@@ -147,7 +190,7 @@ export async function streamRun(input: RunInput, handlers: RunHandlers): Promise
     try {
       detail = (await res.json()).detail;
     } catch {
-      // ignore body parse issues — fall back to the status code
+      // ignore body parse issues - fall back to the status code
     }
     // 422 means the compat gate found an incompatibility; surface every message
     if (res.status === 422 && Array.isArray(detail)) {
@@ -173,12 +216,8 @@ export async function streamRun(input: RunInput, handlers: RunHandlers): Promise
     const name = lines.find((l) => l.startsWith("event:"))?.slice(6).trim() ?? "";
     const dataLine = lines.find((l) => l.startsWith("data:"));
     if (!dataLine) return;
-    let payload: Record<string, unknown> = {};
-    try {
-      payload = JSON.parse(dataLine.slice(5).trim());
-    } catch {
-      return;
-    }
+    const payload = parsePayload(dataLine.slice(5).trim());
+    if (!payload) return;
     const modelId = String(payload.model_id ?? "");
     if (modelId) seen.add(modelId);
     if (name === "run") {
@@ -204,7 +243,7 @@ export async function streamRun(input: RunInput, handlers: RunHandlers): Promise
   }
   if (buffer.trim()) handleBlock(buffer);
 
-  // the backend sends an "end" event after every model settles — if a model
+  // the backend sends an "end" event after every model settles - if a model
   // never got a done/error, the connection dropped mid-stream
   for (const modelId of seen) {
     if (!settled.has(modelId)) {

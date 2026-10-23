@@ -1,12 +1,25 @@
-"""AI Evals backend — FastAPI app entry point."""
+"""FastAPI application entry point for AI Evals."""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_models import router as models_router
 from app.api.routes_runs import router as runs_router
 from app.core.config import settings
+from app.providers.registry import PROVIDERS, is_configured
 
-app = FastAPI(title="AI Evals", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Log which provider credentials were picked up, so a missing .env
+    entry is obvious at a glance instead of a mystery empty picker."""
+    ready = [p["slug"] for p in PROVIDERS if is_configured(p["slug"])]
+    print("providers configured: %s" % (", ".join(ready) or "none"))
+    yield
+
+
+app = FastAPI(title="AI Evals", version="0.1.0", lifespan=lifespan)
 
 # the Vite dev server is the only origin that talks to this API
 app.add_middleware(

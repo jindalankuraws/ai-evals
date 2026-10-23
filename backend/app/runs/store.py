@@ -1,15 +1,14 @@
-"""In-memory run store — the Phase 4a stand-in for Phase 7's SQLite tables.
+"""Runs live in memory for the process lifetime; the Phase 7 SQLite tables will take over from there.
 
 A run record captures everything the judge will later need: the exact prompt
 and params, the judge bound at trigger time, and each model's full response
-as it settles during the stream. Records live for the process lifetime only;
-the Phase 7 swap to SQLite keeps the same shape.
+as it settles during the stream. Phase 7's swap to SQLite keeps the same shape.
 """
 import time
 import uuid
 from dataclasses import dataclass, field
 
-# keep memory bounded — oldest runs fall off the end once the cap is hit
+# keep memory bounded - oldest runs fall off the end once the cap is hit
 MAX_RUNS = 200
 
 

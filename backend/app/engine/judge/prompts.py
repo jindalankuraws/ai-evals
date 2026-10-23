@@ -1,7 +1,7 @@
-"""Judge prompt builder — comparative, one metric per call.
+"""Builds the judge prompts: comparative, blind-letter, one metric per call.
 
 Each judge call sees the user's prompt and every captured response under
-blind letters (A, B, C — the mapping back to model ids never reaches the
+blind letters (A, B, C - the mapping back to model ids never reaches the
 judge), and scores all of them on ONE metric. That comparative framing is
 what turns scores into a curve instead of an absolute bar, and the blind
 letters keep model reputation out of the verdict.
@@ -59,7 +59,7 @@ def build_metric_prompt(
 def build_pairwise_prompt(prompt: str, system_prompt: str, first_text: str, second_text: str) -> tuple[str, str]:
     """Return (system, user) for the masked pairwise tie-break call.
 
-    The judge sees neither the models' names nor their scores — just the
+    The judge sees neither the models' names nor their scores - just the
     user's prompt and two responses. The caller is responsible for having
     randomized which response is first, so position bias can't decide the tie.
     """

@@ -6,7 +6,7 @@ guards → 422 before any tokens are spent), and captures every model's settled
 answer into the in-memory run store. GET /api/runs/{id} reads the capture back.
 
 Phase 4b: POST /api/runs/{id}/evaluate judges a captured run with its bound
-judge model — comparative, blind-letter scoring per metric. Fire-once: the
+judge model - comparative, blind-letter scoring per metric. Fire-once: the
 first call runs the judge and caches the verdict on the run; re-calls return
 the cached verdict without re-spending judge tokens.
 """
@@ -18,12 +18,10 @@ from app.engine.compat import find_conflicts, judge_conflicts
 from app.engine.judge import EvaluationError, NotEnoughResponses, evaluate_run
 from app.engine.orchestrator import fan_out
 from app.models.schemas import RunRequest
-from app.providers.openrouter import OpenRouterAdapter
+from app.providers import registry
 from app.runs.store import store
 
 router = APIRouter(prefix="/api", tags=["runs"])
-
-adapter = OpenRouterAdapter()
 
 
 @router.post("/run")
@@ -49,7 +47,7 @@ async def run(req: RunRequest):
         # first event: the run handle the frontend keeps for the evaluate call
         yield event("run", {"run_id": record.run_id, "judge_model": record.judge_model})
 
-        async for tagged in fan_out(adapter, req.model_ids, req.prompt, req.system_prompt, req.params):
+        async for tagged in fan_out(registry.adapter_for, req.model_ids, req.prompt, req.system_prompt, req.params):
             ev = tagged.event
             result = record.result_for(tagged.model_id)
             if ev.kind == "token":
@@ -82,7 +80,7 @@ async def run(req: RunRequest):
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str):
-    """Read one run's capture back — prompt, params, judge, per-model results."""
+    """Read one run's capture back - prompt, params, judge, per-model results."""
     record = store.get(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Unknown run: %s" % run_id)
@@ -119,7 +117,7 @@ async def evaluate_run_endpoint(run_id: str):
     if record.status != "complete":
         raise HTTPException(
             status_code=409,
-            detail="Run %s is not complete yet — evaluation needs the final responses." % run_id,
+            detail="Run %s is not complete yet - evaluation needs the final responses." % run_id,
         )
     if record.evaluating:
         raise HTTPException(
@@ -129,7 +127,7 @@ async def evaluate_run_endpoint(run_id: str):
         return record.evaluation  # fire-once: the cached verdict stands
     record.evaluating = True
     try:
-        return await evaluate_run(record, adapter)
+        return await evaluate_run(record, registry.adapter_for(record.judge_model))
     except NotEnoughResponses as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except EvaluationError as exc:

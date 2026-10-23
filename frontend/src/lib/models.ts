@@ -4,10 +4,12 @@ import type { ModelInfo } from "../api";
 // hard cap on how many models one comparison run may include
 export const MAX_MODELS = 3;
 
-// provider slug from a model id, e.g. "openai/gpt-4o" -> "openai"
+// provider slug from a model's composite id, e.g. "openrouter::anthropic/claude"
+// -> "openrouter"; falls back to the provider field, then "custom"
 export function providerOf(model: ModelInfo): string {
-  const slash = model.id.indexOf("/");
-  return slash === -1 ? "custom" : model.id.slice(0, slash);
+  if (model.provider) return model.provider;
+  const sep = model.id.indexOf("::");
+  return sep === -1 ? "custom" : model.id.slice(0, sep);
 }
 
 // two-letter monogram from the display name, skipping version numbers so

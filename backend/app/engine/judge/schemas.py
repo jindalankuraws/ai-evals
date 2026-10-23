@@ -1,7 +1,7 @@
 """Verdict shapes the judge model must emit.
 
 MetricCallVerdict is the raw JSON one judge call returns for one metric
-across all compared responses. Pydantic validates it strictly — a malformed
+across all compared responses. Pydantic validates it strictly - a malformed
 verdict costs the call one retry before the metric is marked an inference
 error.
 """

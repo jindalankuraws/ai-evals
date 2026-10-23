@@ -1,9 +1,9 @@
-"""Judge engine — LLM-as-Judge over a captured run, one metric per call.
+"""A captured run gets judged one metric at a time, with responses shown under blind letters.
 
 Every judge call is comparative: it sees the user's prompt and all captured
-responses under blind letters (A/B/C — the model-id mapping stays on the
+responses under blind letters (A/B/C - the model-id mapping stays on the
 server), and scores them on a single 1-5 metric. Scores normalize to 0-1,
-get combined with each metric's weight, and the top score wins — unless the
+get combined with each metric's weight, and the top score wins - unless the
 top two finish within TIE_BAND, when one masked pairwise call breaks the
 tie. A judge call that fails validation twice is marked an inference error
 and its weight is re-normalized across the metrics that did come back.
@@ -18,14 +18,15 @@ from app.engine.judge.metrics import Metric, METRICS
 from app.engine.judge.prompts import build_metric_prompt, build_pairwise_prompt
 from app.engine.judge.schemas import MetricCallVerdict, PairwiseVerdict
 from app.providers.base import ProviderAdapter, SharedParams
+from app.providers.registry import parse_composite
 
 TIE_BAND = 0.15  # top-two gap within this range goes to the pairwise tie-break
 RETRIES = 1  # one extra judge call per metric before declaring an inference error
-LETTERS = "ABC"  # enough for MAX_MODELS=3 — extend if the cap ever rises
+LETTERS = "ABC"  # enough for MAX_MODELS=3 - extend if the cap ever rises
 
 
 class EvaluationError(Exception):
-    """Run-level failure — no verdict could be produced at all."""
+    """Run-level failure - no verdict could be produced at all."""
 
 
 class NotEnoughResponses(EvaluationError):
@@ -124,7 +125,7 @@ async def _call_metric(
     schema = _metric_schema()
     last_error = None
     for _ in range(1 + RETRIES):
-        raw = await adapter.complete(record.judge_model, user, system, params, schema)
+        raw = await adapter.complete(parse_composite(record.judge_model)[1], user, system, params, schema)
         if raw.error:
             last_error = raw.error
             continue
@@ -149,7 +150,7 @@ async def _call_pairwise(
     schema = _pairwise_schema()
     last_error = None
     for _ in range(1 + RETRIES):
-        raw = await adapter.complete(record.judge_model, user, system, params, schema)
+        raw = await adapter.complete(parse_composite(record.judge_model)[1], user, system, params, schema)
         if raw.error:
             last_error = raw.error
             continue
@@ -173,7 +174,7 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
     )
     if len(completed) < 2:
         raise NotEnoughResponses(
-            "only %d of %d models returned a usable response — at least two "
+            "only %d of %d models returned a usable response - at least two "
             "are needed for a comparison" % (len(completed), len(record.model_ids))
         )
 
@@ -188,7 +189,7 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
     )
 
     metric_payload = {}
-    usable = []  # metrics that scored — their weights share the overall score
+    usable = []  # metrics that scored - their weights share the overall score
     last_metric_error = None
     for metric, (verdict, error) in zip(METRICS, results):
         entry = {"label": metric.label, "weight": metric.weight}
@@ -212,7 +213,7 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
 
     if not usable:
         raise EvaluationError(
-            "every judge call failed for run %s — last error: %s"
+            "every judge call failed for run %s - last error: %s"
             % (record.run_id, last_metric_error)
         )
     total_weight = sum(m.weight for m in usable)

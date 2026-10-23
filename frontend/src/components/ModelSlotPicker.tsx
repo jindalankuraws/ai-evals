@@ -1,45 +1,50 @@
 import { useMemo, useState } from "react";
-import type { ModelInfo } from "../api";
+import type { ModelInfo, ProviderFetchStatus, ProviderInfo } from "../api";
 import Monogram from "./Monogram";
 
-// The inference providers a slot can target, in the order they were chosen.
-// Stage A ships with OpenRouter wired up; the other three light up as their
-// adapters land in the backend work.
-const PROVIDERS = [
-  { id: "openai", label: "OpenAI", hint: "GPT models via OPENAI_API_KEY" },
-  { id: "anthropic", label: "Anthropic", hint: "Claude models via ANTHROPIC_API_KEY" },
-  { id: "openrouter", label: "OpenRouter", hint: "One key, hundreds of hosted models" },
-  { id: "openai-compatible", label: "OpenAI-compatible", hint: "Self-hosted or local endpoints" },
-] as const;
-
 // One slot in the comparison grid. An empty slot opens a two-step picker:
-// pick an inference provider first, then a model within it. The model step
-// shows full names only — no pricing or context noise.
+// pick an inference provider first, then a model within it. The provider list
+// comes from the backend's /api/providers - unconfigured providers are shown
+// grayed out with the env key they need, and configured ones that returned no
+// models show the fetch status (bad key, timeout, ...) so the failure is
+// diagnosable. The model step shows full names only, no pricing or context noise.
 export default function ModelSlotPicker({
   models,
+  providers,
+  providerStatus,
   takenIds,
   onPick,
   disabled,
 }: {
   models: ModelInfo[];
+  providers: ProviderInfo[];
+  providerStatus: Record<string, ProviderFetchStatus>;
   takenIds: string[];
   onPick: (model: ModelInfo) => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  // null → provider step, otherwise the chosen provider id
+  // null → provider step, otherwise the chosen provider slug
   const [provider, setProvider] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  // Stage A: the backend catalog is OpenRouter-only, so every model belongs
-  // to OpenRouter and the other providers have no listings yet.
-  const modelsFor = (id: string): ModelInfo[] => (id === "openrouter" ? models : []);
+  // models of the chosen provider, straight from the merged catalog
+  const modelsFor = useMemo(() => {
+    const byProvider = new Map<string, ModelInfo[]>();
+    for (const m of models) {
+      const list = byProvider.get(m.provider) ?? [];
+      list.push(m);
+      byProvider.set(m.provider, list);
+    }
+    return (slug: string) => byProvider.get(slug) ?? [];
+  }, [models]);
 
   // how many models each provider can offer right now
-  const counts = useMemo(
-    () => new Map(PROVIDERS.map((p) => [p.id, modelsFor(p.id).length])),
-    [models],
-  );
+  const counts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of providers) map.set(p.slug, modelsFor(p.slug).length);
+    return map;
+  }, [providers, modelsFor]);
 
   const q = query.trim().toLowerCase();
   const shownModels = useMemo(
@@ -49,7 +54,7 @@ export default function ModelSlotPicker({
             (m) => q === "" || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
           )
         : [],
-    [provider, models, q],
+    [provider, modelsFor, q],
   );
 
   if (!open) {
@@ -94,7 +99,7 @@ export default function ModelSlotPicker({
 
       <div className="scroll-slim flex-1 overflow-y-auto p-1.5">
 
-        {/* step 2 — full model names of the chosen provider */}
+        {/* step 2 - full model names of the chosen provider */}
         {provider !== null && (
           <>
             <button
@@ -134,40 +139,59 @@ export default function ModelSlotPicker({
             })}
             {shownModels.length === 0 && (
               <p className="px-3 py-8 text-center text-xs text-slate-400">
-                {q ? `No models match “${query}”.` : "No models available for this provider yet."}
+                {q
+                  ? `No models match “${query}”.`
+                  : providerStatus[provider]?.error ?? "No models available for this provider yet."}
               </p>
             )}
           </>
         )}
 
-        {/* step 1 — the inference providers, fixed list */}
+        {/* step 1 - the inference providers, live from /api/providers */}
         {provider === null && (
           <>
-            {PROVIDERS.filter((p) => q === "" || p.label.toLowerCase().includes(q)).map((p) => {
-              const count = counts.get(p.id) ?? 0;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={count === 0}
-                  onClick={() => {
-                    setProvider(p.id);
-                    setQuery("");
-                  }}
-                  className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
-                    count === 0 ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-slate-100"
-                  }`}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-slate-700">{p.label}</span>
-                    <span className="block truncate text-[11px] text-slate-400">{p.hint}</span>
-                  </span>
-                  <span className="shrink-0 text-[11px] text-slate-400">
-                    {count === 0 ? "not wired up yet" : `${count} models`}
-                  </span>
-                </button>
-              );
-            })}
+            {providers
+              .filter((p) => q === "" || p.label.toLowerCase().includes(q))
+              .map((p) => {
+                const count = counts.get(p.slug) ?? 0;
+                // unconfigured: grayed out, with the env key the user must add.
+                // configured but empty: surface the fetch failure, never a bare
+                // "no models" for a provider that should have models
+                const hint = p.configured
+                  ? p.hint
+                  : `add ${p.api_key_env} to backend/.env`;
+                const status = providerStatus[p.slug];
+                // a provider earns its selectable state from a successful
+                // fetch, not just from having a key in the env
+                const selectable = p.configured && status?.state === "ok";
+                const stateLabel = !p.configured
+                  ? "not set up"
+                  : status?.state === "failed"
+                    ? status?.error ?? "no models"
+                    : `${count} models`;
+                return (
+                  <button
+                    key={p.slug}
+                    type="button"
+                    disabled={!selectable}
+                    onClick={() => {
+                      setProvider(p.slug);
+                      setQuery("");
+                    }}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
+                      selectable
+                        ? "cursor-pointer hover:bg-slate-100"
+                        : "cursor-not-allowed opacity-50"
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-slate-700">{p.label}</span>
+                      <span className="block truncate text-[11px] text-slate-400">{hint}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] text-slate-400">{stateLabel}</span>
+                  </button>
+                );
+              })}
           </>
         )}
       </div>

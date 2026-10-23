@@ -1,1 +1,1 @@
-"""Run orchestration — fan one prompt out to N models concurrently."""
+"""Concurrent fan-out of one prompt to N models; see ``orchestrator`` for the machinery."""

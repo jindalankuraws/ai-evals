@@ -1,6 +1,6 @@
 """Provider adapter interface.
 
-The rest of the app only talks to this interface — never to a vendor API
+The rest of the app only talks to this interface - never to a vendor API
 directly. OpenRouter ships first; native OpenAI/Anthropic/Bedrock or a
 self-hosted LiteLLM adapter can slot in later without touching anything else.
 """
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 
 class SharedParams(BaseModel):
-    """Inference params shared by every model in a run — the apple-to-apple rule.
+    """Inference params shared by every model in a run - the apple-to-apple rule.
 
     All three are optional: anything unset is left to the model's own default.
     """
@@ -37,7 +37,7 @@ class StreamEvent:
 
 @dataclass
 class Completion:
-    """One settled, non-streamed completion — what the judge engine consumes."""
+    """One settled, non-streamed completion - what the judge engine consumes."""
 
     text: str = ""
     finish_reason: str | None = None
@@ -75,6 +75,6 @@ class ProviderAdapter(ABC):
         The judge engine uses this instead of streaming: verdicts are read
         whole and parsed as JSON. response_format, when given, is the
         provider's structured-output constraint (OpenRouter's json_schema
-        response_format) — pass None for plain text.
+        response_format) - pass None for plain text.
         """
         ...

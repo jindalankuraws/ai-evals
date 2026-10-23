@@ -1,4 +1,4 @@
-"""OpenRouter adapter — streams chat completions via their OpenAI-compatible API."""
+"""Streams chat completions through OpenRouter's OpenAI-compatible API."""
 import json
 import time
 from typing import AsyncIterator
@@ -14,8 +14,8 @@ CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 class OpenRouterAdapter(ProviderAdapter):
     """Streams one completion for one OpenRouter model.
 
-    Everything abnormal — bad key, unknown model, provider overload, network
-    drop — comes back as a StreamEvent of kind "error" so the caller can show
+    Everything abnormal - bad key, unknown model, provider overload, network
+    drop - comes back as a StreamEvent of kind "error" so the caller can show
     it in the UI instead of the whole request dying.
     """
 

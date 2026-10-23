@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   evaluateRun,
   fetchModels,
+  fetchProviders,
   streamRun,
   RunConflictError,
   type EvaluationResult,
   type ModelInfo,
+  type ProviderFetchStatus,
+  type ProviderInfo,
   type SharedParams,
 } from "./api";
 import JudgePicker from "./components/JudgePicker";
@@ -17,16 +20,36 @@ import { eligibleJudges, pickJudge } from "./lib/judge";
 
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
+  // per-provider catalog fetch outcome, so a configured provider with zero
+  // models can say why (rejected key, timeout) instead of just "no models"
+  const [providerStatus, setProviderStatus] = useState<Record<string, ProviderFetchStatus>>({});
+  // what the picker's provider step renders - configured rows are clickable,
+  // the rest stay grayed out with their env-key hint
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   // the comparison is three independent slots; a slot can stay empty, so any
-  // mix works — same model on different providers, or different models on
+  // mix works - same model on different providers, or different models on
   // one provider. The same model id can't sit in two slots at once.
   const [slots, setSlots] = useState<(ModelInfo | null)[]>(() =>
     Array.from({ length: MAX_MODELS }, () => null),
   );
   const selected = slots.filter((m): m is ModelInfo => m !== null);
+
+  // keep the judge valid after every lineup change - eligibility depends on
+  // the compared families, so a manual pick survives only while it stays
+  // eligible. Runs at pick time rather than in an effect, so a run or
+  // evaluation in flight can never trigger it.
+  const reselectJudge = (nextIds: string[]) => {
+    setJudgeId((prev) => {
+      if (prev && eligibleJudges(models, nextIds).some((m) => m.id === prev)) return prev;
+      return pickJudge(models, nextIds)?.id ?? null;
+    });
+  };
+
   const setSlot = (index: number, model: ModelInfo | null) => {
-    setSlots((prev) => prev.map((s, i) => (i === index ? model : s)));
+    const next = slots.map((s, i) => (i === index ? model : s));
+    setSlots(next);
+    reselectJudge(next.filter((m): m is ModelInfo => m !== null).map((m) => m.id));
   };
 
   const [prompt, setPrompt] = useState("");
@@ -39,7 +62,7 @@ export default function App() {
   const [panes, setPanes] = useState<Record<string, PaneState>>({});
   const [banner, setBanner] = useState<string | null>(null);
 
-  // judge + evaluation — the judge is bound to the run at trigger time and
+  // judge + evaluation - the judge is bound to the run at trigger time and
   // the evaluate call fires exactly once when the stream ends (fire-once on
   // the backend, so a StrictMode double-invoke can't re-spend tokens)
   const [judgeId, setJudgeId] = useState<string | null>(null);
@@ -56,24 +79,21 @@ export default function App() {
   // the catalog loads once on mount
   useEffect(() => {
     fetchModels()
-      .then(setModels)
+      .then(({ models, providerStatus }) => {
+        setModels(models);
+        setProviderStatus(providerStatus);
+      })
+      .catch((e: Error) => setLoadError(e.message));
+    fetchProviders()
+      .then(setProviders)
       .catch((e: Error) => setLoadError(e.message));
   }, []);
 
-  // auto-preselect the judge whenever the lineup changes — eligibility depends
-  // on the compared families, so a manual pick survives only while it stays
-  // eligible. Locked while a run or evaluation is in flight.
+  // locked while a run or evaluation is in flight.
   const locked = running || evaluating;
-  useEffect(() => {
-    if (locked) return;
-    const ids = selected.map((m) => m.id);
-    if (!judgeId || !eligibleJudges(models, ids).some((m) => m.id === judgeId)) {
-      setJudgeId(pickJudge(models, ids)?.id ?? null);
-    }
-  }, [models, slots, judgeId, locked]);
 
   // a shared param is unsupported when any selected model lacks it, and
-  // "blocked" once it also holds a value — the run stays gated until then.
+  // "blocked" once it also holds a value - the run stays gated until then.
   // `missing` keeps the offender names so the warning can point at them.
   const paramState = (name: keyof SharedParams) => {
     const missing = selected.filter((m) => !m.supported_parameters.includes(name));
@@ -87,7 +107,7 @@ export default function App() {
   const paramsBlocked = temp.blocked || top.blocked || mt.blocked;
   const blockedParams = [temp, top, mt].filter((p) => p.blocked);
 
-  // "A and B" / "A, B, and C" — matches how the model chips read out names
+  // "A and B" / "A, B, and C" - matches how the model chips read out names
   function joinNames(names: string[]): string {
     if (names.length <= 1) return names[0] ?? "";
     if (names.length === 2) return `${names[0]} and ${names[1]}`;
@@ -102,7 +122,7 @@ export default function App() {
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  // auto-evaluate exactly once per run — fired when the stream settles, with
+  // auto-evaluate exactly once per run - fired when the stream settles, with
   // the run_id captured from the opening `run` event. Fire-once on the
   // backend, so an accidental repeat returns the cached verdict.
   async function autoEvaluate(runId: string) {
@@ -114,12 +134,12 @@ export default function App() {
       const failed = Object.values(result.metrics).filter((m) => m.status === "inference_error");
       if (failed.length > 0) {
         setEvalNote(
-          `Partial evaluation — ${failed.map((m) => m.label).join(", ")} could not be scored` +
+          `Partial evaluation - ${failed.map((m) => m.label).join(", ")} could not be scored` +
             ` (${failed.map((m) => m.error ?? "judge error").join("; ")}). The overall is weight-averaged over the scored metrics.`,
         );
       }
     } catch (err) {
-      setEvalNote(`Evaluation failed — ${(err as Error).message} A fresh run is the only path.`);
+      setEvalNote(`Evaluation failed - ${(err as Error).message} A fresh run is the only path.`);
     } finally {
       setEvaluating(false);
     }
@@ -188,7 +208,7 @@ export default function App() {
       }
     } finally {
       setRunning(false);
-      // the stream has settled — the run is complete on the backend, so the
+      // the stream has settled - the run is complete on the backend, so the
       // single evaluate call fires now (exactly once per run)
       if (runIdRef.current) void autoEvaluate(runIdRef.current);
     }
@@ -213,7 +233,7 @@ export default function App() {
       <main className="mx-auto max-w-6xl px-6 pb-16">
         {loadError && (
           <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {loadError} — check that the backend is running on port 8000 and reload.
+            {loadError} - check that the backend is running on port 8000 and reload.
           </div>
         )}
 
@@ -233,7 +253,7 @@ export default function App() {
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             rows={2}
-            placeholder="Optional — sets the same persona or rules for every model."
+            placeholder="Optional - sets the same persona or rules for every model."
             className="w-full resize-y rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm leading-6 outline-none transition-colors placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
           />
 
@@ -256,7 +276,7 @@ export default function App() {
                     className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600"
                   >
                     {label} has a value, but {joinNames(names)}{" "}
-                    {names.length === 1 ? "doesn't" : "don't"} support it — clear it or remove{" "}
+                    {names.length === 1 ? "doesn't" : "don't"} support it - clear it or remove{" "}
                     {who} to run.
                   </p>
                 );
@@ -320,7 +340,7 @@ export default function App() {
             )}
           </div>
 
-          {/* judge banners — partial / failed / tie-break, no retry buttons */}
+          {/* judge banners - partial / failed / tie-break, no retry buttons */}
           {evalNote && (
             <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs leading-5 text-amber-800">
               {evalNote}
@@ -328,10 +348,10 @@ export default function App() {
           )}
           {evaluation?.tie_break?.winner && (
             <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs leading-5 text-indigo-800">
-              Tie at the 0.15 band — decided by a masked head-to-head: {evaluation.tie_break.rationale}
+              Tie at the 0.15 band - decided by a masked head-to-head: {evaluation.tie_break.rationale}
             </div>
           )}
-          {/* one card per slot — empty slots show the picker, filled slots show
+          {/* one card per slot - empty slots show the picker, filled slots show
               the output (or an add-someone-here card before the first run) */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {slots.map((m, i) => {
@@ -351,6 +371,8 @@ export default function App() {
                   <ModelSlotPicker
                     key={`slot-${i}`}
                     models={models}
+                    providers={providers}
+                    providerStatus={providerStatus}
                     takenIds={slots.flatMap((s) => (s ? [s.id] : []))}
                     onPick={(model) => setSlot(i, model)}
                     disabled={locked}

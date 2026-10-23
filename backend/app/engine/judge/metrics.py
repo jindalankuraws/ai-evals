@@ -1,4 +1,4 @@
-"""Metric registry — the five comparison dimensions and their G-Eval rubrics.
+"""What makes two model responses comparable? Five weighted dimensions, each with its own G-Eval rubric.
 
 Each metric carries a weight (its share of the overall score) and anchored
 1-and-5 rubric descriptions in the G-Eval style: concrete behaviour beats
@@ -45,7 +45,7 @@ METRICS: list[Metric] = [
             "Does the response satisfy every explicit constraint (format, length, tone, "
             "structure) and the reasonable implicit ones (role, language)?"
         ),
-        score_1="Ignores the prompt's core instructions — wrong format or length entirely.",
+        score_1="Ignores the prompt's core instructions - wrong format or length entirely.",
         score_5=(
             "Satisfies every explicit constraint and the reasonable implicit ones, "
             "with nothing missing."

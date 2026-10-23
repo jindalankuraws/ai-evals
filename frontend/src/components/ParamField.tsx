@@ -1,6 +1,6 @@
 // One shared-parameter input. "unsupported" means at least one selected model
 // can't take this param (dimmed); "blocked" means the param has a value AND is
-// unsupported — the run stays gated until it's cleared or the model removed.
+// unsupported - the run stays gated until it's cleared or the model removed.
 export default function ParamField({
   label,
   value,

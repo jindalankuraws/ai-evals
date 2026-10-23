@@ -14,5 +14,6 @@ dist/
 .DS_Store
 *.log
 
-# Working notes
-PLAN.md
+# Working notes - ignore every markdown file except the readme
+*.md
+!README.md
