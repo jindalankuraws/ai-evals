@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+.pytest_cache/
+.ruff_cache/
 
 # Node
 node_modules/
@@ -11,3 +13,6 @@ dist/
 # Misc
 .DS_Store
 *.log
+
+# Working notes
+PLAN.md
