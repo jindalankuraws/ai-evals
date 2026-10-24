@@ -71,7 +71,7 @@ async def judge_conflicts(req: RunRequest) -> list[str]:
 
     entry = catalog.get(req.judge_model)
     if entry is None:
-        return _catalog_errors(req) or ["Unknown judge model: %s" % req.judge_model]
+        return (await _catalog_errors(req)) or ["Unknown judge model: %s" % req.judge_model]
 
     supported = entry.get("supported_parameters") or []
     if not STRUCTURED_OUTPUT_KEYS & set(supported):
@@ -95,11 +95,12 @@ async def find_conflicts(req: RunRequest) -> list[str]:
     """Return one human-readable message per incompatibility (empty list = OK)."""
     catalog = {m["id"]: m for m in await get_catalog()}
     problems: list[str] = []
+    if any(model_id not in catalog for model_id in req.model_ids):
+        problems.extend(await _catalog_errors(req))
 
     for model_id in req.model_ids:
         entry = catalog.get(model_id)
         if entry is None:
-            problems.extend(await _catalog_errors(req))
             continue
 
         supported = entry.get("supported_parameters") or []
