@@ -18,6 +18,7 @@ FAIL_TTL_SECONDS = 60  # a failed fetch is retried at most once a minute
 FETCH_TIMEOUT_SECONDS = 10.0
 _cache: dict[str, tuple[float, list[dict]]] = {}  # slug -> (fetched_at, models)
 _failures: dict[str, tuple[float, str]] = {}  # slug -> (failed_at, error)
+_anthropic_max_tokens: dict[str, int] = {}  # bare model id -> max_tokens ceiling
 
 # OpenAI's /v1/models lists everything on the platform - keep chat-capable
 # models only by screening out the audio/image/embedding/legacy families
@@ -107,6 +108,8 @@ async def _fetch_anthropic(client: httpx.AsyncClient) -> list[dict]:
             raise RuntimeError("Anthropic catalog HTTP %d" % resp.status_code)
         data = resp.json()
         for m in data.get("data", []):
+            if m.get("max_tokens"):
+                _anthropic_max_tokens[m.get("id")] = m["max_tokens"]
             entries.append(
                 _entry(
                     "anthropic",
@@ -122,6 +125,11 @@ async def _fetch_anthropic(client: httpx.AsyncClient) -> list[dict]:
         last = data.get("data")[-1]
         after_id = (last or {}).get("id")
     return entries
+
+
+def anthropic_max_tokens(model_id: str) -> int | None:
+    """The max_tokens ceiling Anthropic lists for a bare model id, if known."""
+    return _anthropic_max_tokens.get(model_id)
 
 
 async def _fetch_openai_compatible(client: httpx.AsyncClient) -> list[dict]:

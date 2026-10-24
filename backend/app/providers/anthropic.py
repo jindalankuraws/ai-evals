@@ -12,14 +12,17 @@ import time
 
 import httpx
 
+from app.catalog import anthropic_max_tokens
 from app.core.config import settings
 from app.providers.base import Completion, ProviderAdapter, SharedParams, StreamEvent
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
 
-# Anthropic hard-requires max_tokens; used when the run leaves it unset
-DEFAULT_MAX_TOKENS = 2048
+# Anthropic hard-requires max_tokens; used when the run leaves it unset and
+# the catalog has no ceiling for the model
+FALLBACK_MAX_TOKENS = 8192
+JUDGE_MAX_TOKENS = 4096
 
 
 class AnthropicAdapter(ProviderAdapter):
@@ -33,10 +36,10 @@ class AnthropicAdapter(ProviderAdapter):
             "anthropic-version": API_VERSION,
         }
 
-    def _body(self, model_id, prompt, system_prompt, params) -> dict:
+    def _body(self, model_id, prompt, system_prompt, params, default_max_tokens) -> dict:
         body = {
             "model": model_id,
-            "max_tokens": params.max_tokens if params.max_tokens is not None else DEFAULT_MAX_TOKENS,
+            "max_tokens": params.max_tokens if params.max_tokens is not None else default_max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
         if system_prompt:
@@ -48,7 +51,8 @@ class AnthropicAdapter(ProviderAdapter):
         return body
 
     async def stream_completion(self, model_id, prompt, system_prompt, params):
-        body = self._body(model_id, prompt, system_prompt, params)
+        default_max_tokens = anthropic_max_tokens(model_id) or FALLBACK_MAX_TOKENS
+        body = self._body(model_id, prompt, system_prompt, params, default_max_tokens)
         body["stream"] = True
 
         started = time.perf_counter()
@@ -101,7 +105,7 @@ class AnthropicAdapter(ProviderAdapter):
     async def complete(self, model_id, prompt, system_prompt, params, response_format=None):
         # Anthropic's messages API has no json_schema response_format - the
         # judge prompts already demand JSON in plain text, which works fine.
-        body = self._body(model_id, prompt, system_prompt, params)
+        body = self._body(model_id, prompt, system_prompt, params, JUDGE_MAX_TOKENS)
         started = time.perf_counter()
         try:
             timeout = httpx.Timeout(300.0, connect=15.0)
