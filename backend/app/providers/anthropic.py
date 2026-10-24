@@ -91,6 +91,11 @@ class AnthropicAdapter(ProviderAdapter):
                             usage["output_tokens"] = (event.get("usage") or {}).get("output_tokens")
                         elif etype == "message_stop":
                             break
+                        elif etype == "error":
+                            err = event.get("error") or {}
+                            message = err.get("message") or err.get("type") or "unknown error"
+                            yield StreamEvent(kind="error", error="Anthropic stream error: %s" % message)
+                            return
 
                     yield StreamEvent(
                         kind="done",
