@@ -112,6 +112,15 @@ def _parse_pairwise(text: str) -> PairwiseVerdict:
         raise ValueError("judge verdict failed schema validation: %s" % exc)
 
 
+async def _complete(adapter, model_id, user, system, params, schema):
+    """Call the judge, retrying once without temperature if the model rejects it."""
+    raw = await adapter.complete(model_id, user, system, params, schema)
+    if raw.error and params.temperature is not None and "temperature" in raw.error.lower():
+        params = SharedParams()
+        raw = await adapter.complete(model_id, user, system, params, schema)
+    return raw, params
+
+
 async def _call_metric(
     adapter: ProviderAdapter,
     record,
@@ -125,7 +134,9 @@ async def _call_metric(
     schema = _metric_schema()
     last_error = None
     for _ in range(1 + RETRIES):
-        raw = await adapter.complete(parse_composite(record.judge_model)[1], user, system, params, schema)
+        raw, params = await _complete(
+            adapter, parse_composite(record.judge_model)[1], user, system, params, schema
+        )
         if raw.error:
             last_error = raw.error
             continue
@@ -150,7 +161,9 @@ async def _call_pairwise(
     schema = _pairwise_schema()
     last_error = None
     for _ in range(1 + RETRIES):
-        raw = await adapter.complete(parse_composite(record.judge_model)[1], user, system, params, schema)
+        raw, params = await _complete(
+            adapter, parse_composite(record.judge_model)[1], user, system, params, schema
+        )
         if raw.error:
             last_error = raw.error
             continue
