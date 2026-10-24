@@ -174,17 +174,16 @@ async def _call_pairwise(
     return None, last_error
 
 
-async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
+async def evaluate_run(record, adapter: ProviderAdapter, seed: int | None = None) -> dict:
     """Judge one captured run and return the evaluation payload.
 
     Raises NotEnoughResponses when fewer than two models produced usable
     text, and EvaluationError when every metric's judge call failed.
     On success the payload is stored on the record and returned.
     """
-    completed = sorted(
-        (r for r in record.results.values() if r.text and not r.error),
-        key=lambda r: r.model_id,
-    )
+    rng = random.Random(seed)
+    completed = [r for r in record.results.values() if r.text and not r.error]
+    rng.shuffle(completed)
     if len(completed) < 2:
         raise NotEnoughResponses(
             "only %d of %d models returned a usable response - at least two "
@@ -198,7 +197,12 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
     params = SharedParams(temperature=0)
 
     results = await asyncio.gather(
-        *(_call_metric(adapter, record, m, responses, expected_letters, params) for m in METRICS)
+        *(
+            _call_metric(
+                adapter, record, m, rng.sample(responses, len(responses)), expected_letters, params
+            )
+            for m in METRICS
+        )
     )
 
     metric_payload = {}
@@ -252,7 +256,7 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
         top_id, runner_up_id = overall[0]["model_id"], overall[1]["model_id"]
         first_id, second_id = top_id, runner_up_id
         # randomize the presentation order so position bias can't decide the tie
-        if random.random() < 0.5:
+        if rng.random() < 0.5:
             first_id, second_id = second_id, first_id
         text_by_id = {r.model_id: r.text for r in completed}
         verdict, error = await _call_pairwise(
