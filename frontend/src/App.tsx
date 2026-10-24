@@ -92,6 +92,15 @@ export default function App() {
   // locked while a run or evaluation is in flight.
   const locked = running || evaluating;
 
+  // old results no longer match the selected models once one is removed
+  const removeModel = (index: number) => {
+    setSlot(index, null);
+    setPanes({});
+    setEvaluation(null);
+    setEvalNote(null);
+    setBanner(null);
+  };
+
   // a shared param is unsupported when any selected model lacks it, and
   // "blocked" once it also holds a value - the run stays gated until then.
   // `missing` keeps the offender names so the warning can point at them.
@@ -115,7 +124,7 @@ export default function App() {
   }
 
   const canRun =
-    selected.length > 0 && prompt.trim() !== "" && !running && !paramsBlocked && judgeId !== null;
+    selected.length >= 2 && prompt.trim() !== "" && !running && !paramsBlocked && judgeId !== null;
 
   const autoScroll = (modelId: string) => {
     const el = scrollRefs.current.get(modelId);
@@ -310,8 +319,8 @@ export default function App() {
               )}
             </button>
             <span className="text-xs text-slate-400">
-              {selected.length === 0
-                ? "Fill at least one slot to enable the run"
+              {selected.length < 2
+                ? "Pick at least two models to run."
                 : `${selected.length} of ${MAX_MODELS} slots filled`}
             </span>
           </div>
@@ -390,9 +399,7 @@ export default function App() {
                   isWinner={evaluation?.winner === m.id}
                   metrics={metrics}
                   evaluating={evaluating}
-                  onClear={
-                    Object.keys(panes).length === 0 ? () => setSlot(i, null) : undefined
-                  }
+                  onClear={locked ? undefined : () => removeModel(i)}
                 />
               );
             })}
