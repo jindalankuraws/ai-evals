@@ -11,6 +11,7 @@ and its weight is re-normalized across the metrics that did come back.
 import asyncio
 import json
 import random
+import re
 
 from pydantic import ValidationError
 
@@ -80,10 +81,22 @@ def _pairwise_schema() -> dict:
     }
 
 
+def _extract_json(text: str) -> str:
+    """Pull the JSON object out of a fenced or prose-wrapped judge reply."""
+    stripped = text.strip()
+    fence = re.match(r"^```[\w-]*\s*(.*?)\s*```$", stripped, re.DOTALL)
+    if fence:
+        return fence.group(1)
+    start, end = stripped.find("{"), stripped.rfind("}")
+    if start != -1 and end > start:
+        return stripped[start:end + 1]
+    return stripped
+
+
 def _parse_metric(text: str, expected_letters: set[str]) -> MetricCallVerdict:
     """Strictly validate one metric's raw verdict JSON against the letters."""
     try:
-        data = json.loads(text)
+        data = json.loads(_extract_json(text))
     except json.JSONDecodeError as exc:
         raise ValueError("judge returned invalid JSON: %s" % exc)
     try:
@@ -103,7 +116,7 @@ def _parse_metric(text: str, expected_letters: set[str]) -> MetricCallVerdict:
 def _parse_pairwise(text: str) -> PairwiseVerdict:
     """Strictly validate the tie-break's raw verdict JSON."""
     try:
-        data = json.loads(text)
+        data = json.loads(_extract_json(text))
     except json.JSONDecodeError as exc:
         raise ValueError("judge returned invalid JSON: %s" % exc)
     try:
