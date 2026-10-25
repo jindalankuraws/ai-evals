@@ -37,7 +37,7 @@ METRICS: list[Metric] = [
             "Does the response satisfy every explicit constraint (format, length, tone, "
             "structure) and the reasonable implicit ones (role, language)?"
         ),
-        score_1="Ignores the prompt's core instructions - wrong format or length entirely.",
+        score_1="Ignores the prompt's core instructions: wrong format or length entirely.",
         score_5=(
             "Satisfies every explicit constraint and the reasonable implicit ones, "
             "with nothing missing."
