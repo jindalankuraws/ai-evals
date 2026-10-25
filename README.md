@@ -5,7 +5,7 @@ AI Evals helps you choose a model for your use case. It sends the same prompt to
 ## What it does
 
 - Pick two or three models from a live catalog to compare, side by side
-- One shared prompt and one shared set of inference parameters for every model, so the comparison is fair by construction
+- The same prompt and the same settings go to every model
 - Responses stream into the UI as they are generated
 - An LLM judge scores every response on five metrics (correctness, instruction following, helpfulness, clarity and conciseness), highlights the strongest answer, and shows the reasoning behind each score
 
@@ -76,7 +76,7 @@ Then open http://localhost:5173 in your browser. The frontend calls the backend 
 ## How a run works
 
 1. Pick two or three models. A run needs at least two.
-2. Write the shared prompt and set the shared parameters. The run only starts once every selected model supports every parameter.
+2. Write the shared prompt and, optionally, set temperature, top_p or max tokens. The run is blocked if a model's listed parameters don't include a setting you filled in (see Known limitations for native OpenAI and Anthropic models).
 3. Watch the responses stream in side by side over server-sent events.
 4. When every stream has finished, the judge scores the answers once, and each pane shows its per-metric scores with the overall winner highlighted.
 
