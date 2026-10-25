@@ -1,12 +1,4 @@
-"""Why give Anthropic its own adapter when OpenRouter also serves Claude models? Because the wire format differs.
-
-A few things differ from the OpenAI dialect:
-- system prompts travel as a top-level ``system`` field, not a message;
-- max_tokens is mandatory, so we fall back to a sane default when the
-  caller leaves it unset;
-- the streaming SSE shape is event-based (message_start / content_block_delta /
-  message_delta / message_stop) instead of the data-only OpenAI chunks.
-"""
+"""Anthropic Messages API adapter."""
 import json
 import time
 
@@ -14,7 +6,7 @@ import httpx
 
 from app.catalog import anthropic_max_tokens
 from app.core.config import settings
-from app.providers.base import Completion, ProviderAdapter, SharedParams, StreamEvent
+from app.providers.base import Completion, ProviderAdapter, StreamEvent
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -108,8 +100,7 @@ class AnthropicAdapter(ProviderAdapter):
             yield StreamEvent(kind="error", error="Connection to Anthropic failed: %s" % exc)
 
     async def complete(self, model_id, prompt, system_prompt, params, response_format=None):
-        # Anthropic's messages API has no json_schema response_format - the
-        # judge prompts already demand JSON in plain text, which works fine.
+        # response_format is ignored here; the judge prompts already ask for plain JSON
         body = self._body(model_id, prompt, system_prompt, params, JUDGE_MAX_TOKENS)
         started = time.perf_counter()
         try:

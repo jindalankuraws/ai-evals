@@ -1,10 +1,4 @@
-"""Fetches, caches, and merges the model catalog from every configured provider.
-
-The picker and the compatibility checks both read from here, so every model
-dies through one normalization pass regardless of source. Each entry carries
-its provider slug and a composite id (``provider::model``) that the run route
-dispatches on.
-"""
+"""Fetches, caches and merges the model catalog; every model goes through one normalization pass."""
 import asyncio
 import time
 
@@ -20,8 +14,7 @@ _cache: dict[str, tuple[float, list[dict]]] = {}  # slug -> (fetched_at, models)
 _failures: dict[str, tuple[float, str]] = {}  # slug -> (failed_at, error)
 _anthropic_max_tokens: dict[str, int] = {}  # bare model id -> max_tokens ceiling
 
-# OpenAI's /v1/models lists everything on the platform - keep chat-capable
-# models only by screening out the audio/image/embedding/legacy families
+# OpenAI's /v1/models lists everything; skip audio, image, embedding and legacy models
 _OPENAI_SKIP = (
     "whisper", "tts", "dall-e", "davinci", "babbage", "curie", "ada",
     "embedding", "moderation", "audio", "speech", "transcribe", "realtime",
@@ -55,8 +48,6 @@ async def _fetch_openrouter(client: httpx.AsyncClient) -> list[dict]:
         modalities = arch.get("output_modalities") or ["text"]
         if "text" not in modalities:
             continue  # image/audio generators have no place in a text comparison
-        if (m.get("id") or "").endswith(":free"):
-            pass  # keep free models - they are perfectly comparable
         entries.append(
             _entry(
                 "openrouter",
@@ -183,14 +174,7 @@ def _error_text(exc: Exception) -> str:
 
 
 async def get_catalog_report() -> tuple[list[dict], dict[str, dict]]:
-    """Merged catalog plus a per-provider fetch status, in one pass.
-
-    Every configured provider is fetched concurrently; one that fails is
-    skipped (not fatal) and its error lands in the status map so the picker
-    can say *why* a provider has no models. Successful lists are cached for
-    five minutes, failures for sixty seconds so a dead key doesn't get
-    hammered on every page load.
-    """
+    """Merged catalog plus a per-provider fetch status; a provider that fails is skipped, not fatal."""
     async def load(slug: str) -> tuple[str, str, list[dict], str | None]:
         cached = _cache.get(slug)
         if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:

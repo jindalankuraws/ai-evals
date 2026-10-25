@@ -1,11 +1,4 @@
-"""Builds the judge prompts: comparative, blind-letter, one metric per call.
-
-Each judge call sees the user's prompt and every captured response under
-blind letters (A, B, C - the mapping back to model ids never reaches the
-judge), and scores all of them on ONE metric. That comparative framing is
-what turns scores into a curve instead of an absolute bar, and the blind
-letters keep model reputation out of the verdict.
-"""
+"""Builds the judge prompts: comparative, blind letters, one metric per call."""
 from app.engine.judge.metrics import Metric
 
 JUDGE_SYSTEM = (
@@ -25,10 +18,7 @@ def build_metric_prompt(
     system_prompt: str,
     responses: list[tuple[str, str]],
 ) -> tuple[str, str]:
-    """Return (system, user) for one metric's comparative judge call.
-
-    responses is a list of (letter, text) pairs covering every compared model.
-    """
+    """Return (system, user) for one metric's call; responses are (letter, text) pairs."""
     lines = [
         "Dimension: %s" % metric.label,
         "",
@@ -57,12 +47,7 @@ def build_metric_prompt(
 
 
 def build_pairwise_prompt(prompt: str, system_prompt: str, first_text: str, second_text: str) -> tuple[str, str]:
-    """Return (system, user) for the masked pairwise tie-break call.
-
-    The judge sees neither the models' names nor their scores - just the
-    user's prompt and two responses. The caller is responsible for having
-    randomized which response is first, so position bias can't decide the tie.
-    """
+    """Return (system, user) for the tie-break; the caller randomizes which answer comes first."""
     lines = [
         "Two AI responses to the same user prompt ended in a tie on a weighted score. "
         "Decide which response is better overall for this user.",

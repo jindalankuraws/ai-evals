@@ -1,11 +1,4 @@
-"""The thinnest adapter in the codebase: it only re-points the OpenAI wire format at a different base URL.
-
-Anything that speaks the OpenAI chat completions dialect (vLLM, Ollama's
-OpenAI shim, LM Studio, llama.cpp server) works: point
-``OPENAI_COMPATIBLE_BASE_URL`` at it in .env (e.g. ``http://localhost:11434/v1``).
-The API key is optional because most local servers don't check auth.
-"""
-import httpx
+"""Adapter for any OpenAI-compatible endpoint set by OPENAI_COMPATIBLE_BASE_URL."""
 
 from app.core.config import settings
 from app.providers.openai import OpenAIAdapter

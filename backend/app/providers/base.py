@@ -1,9 +1,4 @@
-"""Provider adapter interface.
-
-The rest of the app only talks to this interface - never to a vendor API
-directly. OpenRouter ships first; native OpenAI/Anthropic/Bedrock or a
-self-hosted LiteLLM adapter can slot in later without touching anything else.
-"""
+"""Provider adapter interface; the rest of the app never calls a vendor API directly."""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
@@ -12,10 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class SharedParams(BaseModel):
-    """Inference params shared by every model in a run - the apple-to-apple rule.
-
-    All three are optional: anything unset is left to the model's own default.
-    """
+    """Inference params applied to every model in a run; anything unset uses the model's default."""
 
     temperature: Optional[float] = Field(None, ge=0, le=2)
     top_p: Optional[float] = Field(None, gt=0, le=1)
@@ -37,7 +29,7 @@ class StreamEvent:
 
 @dataclass
 class Completion:
-    """One settled, non-streamed completion - what the judge engine consumes."""
+    """One whole, non-streamed completion, as the judge consumes it."""
 
     text: str = ""
     finish_reason: str | None = None
@@ -70,11 +62,5 @@ class ProviderAdapter(ABC):
         params: SharedParams,
         response_format: dict | None = None,
     ) -> Completion:
-        """One settled completion in a single call.
-
-        The judge engine uses this instead of streaming: verdicts are read
-        whole and parsed as JSON. response_format, when given, is the
-        provider's structured-output constraint (OpenRouter's json_schema
-        response_format) - pass None for plain text.
-        """
+        """Return one whole completion; response_format is a JSON schema constraint, or None for plain text."""
         ...

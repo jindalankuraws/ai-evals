@@ -1,16 +1,11 @@
-"""Streams chat completions over the standard OpenAI wire format.
-
-This is also the base class for any OpenAI-compatible endpoint (see
-``openai_compatible.py``): only the base URL, headers, and a couple of
-capability flags differ. Native OpenAI itself never needs overriding.
-"""
+"""OpenAI chat completions adapter, also the base for OpenAI-compatible endpoints."""
 import json
 import time
 
 import httpx
 
 from app.core.config import settings
-from app.providers.base import Completion, ProviderAdapter, SharedParams, StreamEvent
+from app.providers.base import Completion, ProviderAdapter, StreamEvent
 
 API_URL = "https://api.openai.com/v1/chat/completions"
 

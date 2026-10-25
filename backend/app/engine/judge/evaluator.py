@@ -1,13 +1,4 @@
-"""A captured run gets judged one metric at a time, with responses shown under blind letters.
-
-Every judge call is comparative: it sees the user's prompt and all captured
-responses under blind letters (A/B/C - the model-id mapping stays on the
-server), and scores them on a single 1-5 metric. Scores normalize to 0-1,
-get combined with each metric's weight, and the top score wins - unless the
-top two finish within TIE_BAND, when one masked pairwise call breaks the
-tie. A judge call that fails validation twice is marked an inference error
-and its weight is re-normalized across the metrics that did come back.
-"""
+"""Judges a captured run one metric at a time, with answers under blind letters."""
 import asyncio
 import json
 import random
@@ -23,11 +14,11 @@ from app.providers.registry import parse_composite
 
 TIE_BAND = 0.15  # top-two gap within this range goes to the pairwise tie-break
 RETRIES = 1  # one extra judge call per metric before declaring an inference error
-LETTERS = "ABC"  # enough for MAX_MODELS=3 - extend if the cap ever rises
+LETTERS = "ABC"  # one letter per model, up to MAX_MODELS=3
 
 
 class EvaluationError(Exception):
-    """Run-level failure - no verdict could be produced at all."""
+    """No verdict could be produced for the run."""
 
 
 class NotEnoughResponses(EvaluationError):
@@ -35,7 +26,7 @@ class NotEnoughResponses(EvaluationError):
 
 
 def _metric_schema() -> dict:
-    """OpenRouter json_schema response_format for one metric's verdict."""
+    """JSON schema response_format for one metric's verdict."""
     score_item = {
         "type": "object",
         "properties": {
@@ -62,7 +53,7 @@ def _metric_schema() -> dict:
 
 
 def _pairwise_schema() -> dict:
-    """OpenRouter json_schema response_format for the tie-break verdict."""
+    """JSON schema response_format for the tie-break verdict."""
     return {
         "type": "json_schema",
         "json_schema": {
@@ -188,19 +179,14 @@ async def _call_pairwise(
 
 
 async def evaluate_run(record, adapter: ProviderAdapter, seed: int | None = None) -> dict:
-    """Judge one captured run and return the evaluation payload.
-
-    Raises NotEnoughResponses when fewer than two models produced usable
-    text, and EvaluationError when every metric's judge call failed.
-    On success the payload is stored on the record and returned.
-    """
+    """Judge one captured run, store the payload on the record and return it."""
     rng = random.Random(seed)
     completed = [r for r in record.results.values() if r.text and not r.error]
     rng.shuffle(completed)
     if len(completed) < 2:
         raise NotEnoughResponses(
-            "only %d of %d models returned a usable response - at least two "
-            "are needed for a comparison" % (len(completed), len(record.model_ids))
+            "Only %d of %d models returned a usable response. At least two "
+            "are needed for a comparison." % (len(completed), len(record.model_ids))
         )
 
     letters = {r.model_id: LETTERS[i] for i, r in enumerate(completed)}
@@ -219,7 +205,7 @@ async def evaluate_run(record, adapter: ProviderAdapter, seed: int | None = None
     )
 
     metric_payload = {}
-    usable = []  # metrics that scored - their weights share the overall score
+    usable = []  # metrics that scored; only their weights count toward the overall
     last_metric_error = None
     for metric, (verdict, error) in zip(METRICS, results):
         entry = {"label": metric.label, "weight": metric.weight}
@@ -243,7 +229,7 @@ async def evaluate_run(record, adapter: ProviderAdapter, seed: int | None = None
 
     if not usable:
         raise EvaluationError(
-            "every judge call failed for run %s - last error: %s"
+            "Every judge call failed for run %s. Last error: %s"
             % (record.run_id, last_metric_error)
         )
     total_weight = sum(m.weight for m in usable)

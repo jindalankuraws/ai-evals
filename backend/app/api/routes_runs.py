@@ -1,15 +1,4 @@
-"""Run endpoints.
-
-Phase 4a: POST /api/run opens every run with a `run` event carrying the
-run_id, validates the judge like the shared params (family + structured-output
-guards → 422 before any tokens are spent), and captures every model's settled
-answer into the in-memory run store. GET /api/runs/{id} reads the capture back.
-
-Phase 4b: POST /api/runs/{id}/evaluate judges a captured run with its bound
-judge model - comparative, blind-letter scoring per metric. Fire-once: the
-first call runs the judge and caches the verdict on the run; re-calls return
-the cached verdict without re-spending judge tokens.
-"""
+"""Run endpoints: start a run, read it back, and judge it once."""
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -28,9 +17,9 @@ router = APIRouter(prefix="/api", tags=["runs"])
 async def run(req: RunRequest):
     """Stream every model's completion, tagged by model, as the response body."""
 
-    # apple-to-apple gate: each shared param must be supported by every model
+    # same settings for every model: each shared param must be supported by all of them
     conflicts = await find_conflicts(req)
-    # judge gate: exists, structured-output capable, outside compared families
+    # judge check: exists, supports structured outputs, outside compared families
     conflicts += await judge_conflicts(req)
     if conflicts:
         raise HTTPException(status_code=422, detail=conflicts)
@@ -80,7 +69,7 @@ async def run(req: RunRequest):
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str):
-    """Read one run's capture back - prompt, params, judge, per-model results."""
+    """Read one run back: prompt, params, judge and per-model results."""
     record = store.get(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Unknown run: %s" % run_id)
@@ -117,14 +106,14 @@ async def evaluate_run_endpoint(run_id: str):
     if record.status != "complete":
         raise HTTPException(
             status_code=409,
-            detail="Run %s is not complete yet - evaluation needs the final responses." % run_id,
+            detail="Run %s is not complete yet. Evaluation needs the final responses." % run_id,
         )
     if record.evaluating:
         raise HTTPException(
             status_code=409, detail="An evaluation is already in progress for run %s." % run_id
         )
     if record.evaluation is not None:
-        return record.evaluation  # fire-once: the cached verdict stands
+        return record.evaluation  # evaluated once per run, so return the cached verdict
     record.evaluating = True
     try:
         return await evaluate_run(record, registry.adapter_for(record.judge_model))

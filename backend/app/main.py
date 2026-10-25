@@ -11,8 +11,7 @@ from app.providers.registry import PROVIDERS, is_configured, provider_status
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Log which provider credentials were picked up, so a missing .env
-    entry is obvious at a glance instead of a mystery empty picker."""
+    """Log which providers are configured, so a missing .env entry is obvious."""
     ready = [p["slug"] for p in PROVIDERS if is_configured(p["slug"])]
     print("providers configured: %s" % (", ".join(ready) or "none"))
     yield
