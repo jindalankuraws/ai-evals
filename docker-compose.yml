@@ -1,0 +1,17 @@
+services:
+  backend:
+    build: ./backend
+    env_file: backend/.env
+    ports:
+      - "8000:8000"
+    # lets OPENAI_COMPATIBLE_BASE_URL reach a model server on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build: ./frontend
+    # the browser calls the backend on localhost:8000, and CORS only allows this origin
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend

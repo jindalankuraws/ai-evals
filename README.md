@@ -73,6 +73,16 @@ npm run dev
 
 Then open http://localhost:5173 in your browser. The frontend calls the backend directly at `http://localhost:8000`, so start the backend on that port first.
 
+### Run with Docker
+
+Create `backend/.env` from `.env.example` as above, then from the repo root:
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:5173. The backend runs on port 8000 and reads its keys from `backend/.env` only, not from your shell. To reach a model server on your machine, set `OPENAI_COMPATIBLE_BASE_URL` to `http://host.docker.internal:<port>/v1` instead of `localhost`.
+
 ## How a run works
 
 1. Pick two or three models. A run needs at least two.
