@@ -1,16 +1,10 @@
-"""Which inference providers exist, whether each one is configured, and how composite model ids get parsed.
-
-A model id in this app is composite: ``provider::model`` (e.g.
-``openrouter::anthropic/claude-sonnet-4.5``, ``openai-compatible::qwen3-32b``).
-The registry parses those ids, reports which providers are configured (their
-key/URL is present in settings), and hands out adapter instances.
-"""
+"""Provider list, configuration checks, adapters and composite model id parsing."""
 from functools import lru_cache
 
 from app.core.config import settings
 from app.providers.base import ProviderAdapter
 
-# fixed order - the picker renders providers in this sequence
+# the picker renders providers in this order
 PROVIDERS = [
     {
         "slug": "openai",
@@ -40,11 +34,7 @@ PROVIDERS = [
 
 
 def parse_composite(model_id: str) -> tuple[str, str]:
-    """Split ``provider::model`` into (provider, bare model id).
-
-    Bare ids (no ``::``) are treated as OpenRouter models - that's what the
-    app shipped with, so old clients and old runs keep working.
-    """
+    """Split ``provider::model`` into (provider, bare model id); bare ids are OpenRouter models."""
     if "::" in model_id:
         provider, model = model_id.split("::", 1)
         return provider, model
@@ -110,7 +100,7 @@ def adapter_for(model_id: str) -> ProviderAdapter:
         spec = next((p for p in PROVIDERS if p["slug"] == slug), None)
         env = spec["api_key_env"] if spec else "the provider settings"
         raise KeyError(
-            "Provider '%s' is not configured - set %s in .env and restart the backend."
+            "Provider '%s' is not configured. Set %s in .env and restart the backend."
             % (slug, env)
         )
     return adapter

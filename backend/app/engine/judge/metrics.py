@@ -1,12 +1,4 @@
-"""What makes two model responses comparable? Five weighted dimensions, each with its own G-Eval rubric.
-
-Each metric carries a weight (its share of the overall score) and anchored
-1-and-5 rubric descriptions in the G-Eval style: concrete behaviour beats
-adjectives, and anchoring the extremes keeps scores from clustering in the
-middle. Scores 2-4 are the judge's interpolation between the anchors; if
-calibration (Phase 6.5) shows clustering between two points, middle anchors
-get written then.
-"""
+"""Five weighted metrics, each with written anchors for a score of 1 and 5."""
 from dataclasses import dataclass
 
 

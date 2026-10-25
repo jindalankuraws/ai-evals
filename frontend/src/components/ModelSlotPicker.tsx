@@ -2,12 +2,7 @@ import { useMemo, useState } from "react";
 import type { ModelInfo, ProviderFetchStatus, ProviderInfo } from "../api";
 import Monogram from "./Monogram";
 
-// One slot in the comparison grid. An empty slot opens a two-step picker:
-// pick an inference provider first, then a model within it. The provider list
-// comes from the backend's /api/providers - unconfigured providers are shown
-// grayed out with the env key they need, and configured ones that returned no
-// models show the fetch status (bad key, timeout, ...) so the failure is
-// diagnosable. The model step shows full names only, no pricing or context noise.
+// two-step picker: a provider first, then one of its models
 export default function ModelSlotPicker({
   models,
   providers,
@@ -99,7 +94,7 @@ export default function ModelSlotPicker({
 
       <div className="scroll-slim flex-1 overflow-y-auto p-1.5">
 
-        {/* step 2 - full model names of the chosen provider */}
+        {/* step 2: models of the chosen provider */}
         {provider !== null && (
           <>
             <button
@@ -147,7 +142,7 @@ export default function ModelSlotPicker({
           </>
         )}
 
-        {/* step 1 - the inference providers, live from /api/providers */}
+        {/* step 1: providers from /api/providers */}
         {provider === null && (
           <>
             {providers

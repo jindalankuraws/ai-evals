@@ -1,14 +1,9 @@
-"""Runs live in memory for the process lifetime; the Phase 7 SQLite tables will take over from there.
-
-A run record captures everything the judge will later need: the exact prompt
-and params, the judge bound at trigger time, and each model's full response
-as it settles during the stream. Phase 7's swap to SQLite keeps the same shape.
-"""
+"""Runs are kept in memory and lost on restart."""
 import time
 import uuid
 from dataclasses import dataclass, field
 
-# keep memory bounded - oldest runs fall off the end once the cap is hit
+# oldest runs are dropped once the cap is hit
 MAX_RUNS = 200
 
 
@@ -38,7 +33,7 @@ class RunRecord:
     created_at: float
     results: dict = field(default_factory=dict)  # model_id -> ModelResult
     status: str = "streaming"  # streaming | complete
-    evaluation: dict | None = None  # cached fire-once verdict (Phase 4c)
+    evaluation: dict | None = None  # cached verdict, evaluated once per run
     evaluating: bool = False  # True while a judge call is in flight
 
     def result_for(self, model_id: str) -> ModelResult:
@@ -49,7 +44,7 @@ class RunRecord:
 
 
 class RunStore:
-    """Process-wide store; replaced by the Phase 7 SQLAlchemy repo."""
+    """Process-wide in-memory run store."""
 
     def __init__(self) -> None:
         self._runs: dict[str, RunRecord] = {}

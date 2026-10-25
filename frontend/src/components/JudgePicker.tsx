@@ -2,9 +2,7 @@ import type { ModelInfo } from "../api";
 import { eligibleJudges } from "../lib/judge";
 import Monogram from "./Monogram";
 
-// Judge strip: auto-preselected on model pick (see lib/judge.ts), editable
-// pre-run, locked at trigger. Eligibility mirrors the backend's judge gate -
-// structured outputs + outside every compared model's family.
+// eligibility mirrors the backend's judge check (see lib/judge.ts)
 export default function JudgePicker({
   models,
   selectedIds,
@@ -25,7 +23,7 @@ export default function JudgePicker({
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
       {eligible.length === 0 ? (
         <p className="text-xs text-slate-500">
-          No eligible judge - pick at least one model from a different family that supports structured outputs.
+          No eligible judge. Pick at least one model from a different family that supports structured outputs.
         </p>
       ) : (
         <div className="flex items-center gap-3">
@@ -47,7 +45,7 @@ export default function JudgePicker({
       )}
       <p className="mt-2 text-[11px] leading-4 text-slate-400">
         {disabled
-          ? "Locked for this run - a fresh run picks a new judge."
+          ? "Locked for this run. A new run picks a new judge."
           : "Grades every response comparatively on five fixed metrics. Must sit outside the compared families."}
       </p>
     </div>

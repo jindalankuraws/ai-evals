@@ -6,14 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_models import router as models_router
 from app.api.routes_runs import router as runs_router
-from app.core.config import settings
-from app.providers.registry import PROVIDERS, is_configured
+from app.providers.registry import PROVIDERS, is_configured, provider_status
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Log which provider credentials were picked up, so a missing .env
-    entry is obvious at a glance instead of a mystery empty picker."""
+    """Log which providers are configured, so a missing .env entry is obvious."""
     ready = [p["slug"] for p in PROVIDERS if is_configured(p["slug"])]
     print("providers configured: %s" % (", ".join(ready) or "none"))
     yield
@@ -36,5 +34,4 @@ app.include_router(runs_router)
 @app.get("/health")
 def health():
     """Liveness check for the frontend and any monitoring."""
-    has_key = bool(settings.openrouter_api_key)
-    return {"status": "ok", "openrouter_configured": has_key}
+    return {"status": "ok", "providers": provider_status()}

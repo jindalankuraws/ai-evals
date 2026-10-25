@@ -20,25 +20,16 @@ import { eligibleJudges, pickJudge } from "./lib/judge";
 
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
-  // per-provider catalog fetch outcome, so a configured provider with zero
-  // models can say why (rejected key, timeout) instead of just "no models"
   const [providerStatus, setProviderStatus] = useState<Record<string, ProviderFetchStatus>>({});
-  // what the picker's provider step renders - configured rows are clickable,
-  // the rest stay grayed out with their env-key hint
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // the comparison is three independent slots; a slot can stay empty, so any
-  // mix works - same model on different providers, or different models on
-  // one provider. The same model id can't sit in two slots at once.
+  // slots are independent; the same model id can't sit in two at once
   const [slots, setSlots] = useState<(ModelInfo | null)[]>(() =>
     Array.from({ length: MAX_MODELS }, () => null),
   );
   const selected = slots.filter((m): m is ModelInfo => m !== null);
 
-  // keep the judge valid after every lineup change - eligibility depends on
-  // the compared families, so a manual pick survives only while it stays
-  // eligible. Runs at pick time rather than in an effect, so a run or
-  // evaluation in flight can never trigger it.
+  // runs at pick time, not in an effect, so a run in flight never changes the judge
   const reselectJudge = (nextIds: string[]) => {
     setJudgeId((prev) => {
       if (prev && eligibleJudges(models, nextIds).some((m) => m.id === prev)) return prev;
@@ -62,9 +53,6 @@ export default function App() {
   const [panes, setPanes] = useState<Record<string, PaneState>>({});
   const [banner, setBanner] = useState<string | null>(null);
 
-  // judge + evaluation - the judge is bound to the run at trigger time and
-  // the evaluate call fires exactly once when the stream ends (fire-once on
-  // the backend, so a StrictMode double-invoke can't re-spend tokens)
   const [judgeId, setJudgeId] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
@@ -76,7 +64,6 @@ export default function App() {
     scrollRefs.current.set(id, el);
   }, []);
 
-  // the catalog loads once on mount
   useEffect(() => {
     fetchModels()
       .then(({ models, providerStatus }) => {
@@ -89,12 +76,18 @@ export default function App() {
       .catch((e: Error) => setLoadError(e.message));
   }, []);
 
-  // locked while a run or evaluation is in flight.
   const locked = running || evaluating;
 
-  // a shared param is unsupported when any selected model lacks it, and
-  // "blocked" once it also holds a value - the run stays gated until then.
-  // `missing` keeps the offender names so the warning can point at them.
+  // old results no longer match the selected models once one is removed
+  const removeModel = (index: number) => {
+    setSlot(index, null);
+    setPanes({});
+    setEvaluation(null);
+    setEvalNote(null);
+    setBanner(null);
+  };
+
+  // "blocked" means the param has a value that a selected model can't take
   const paramState = (name: keyof SharedParams) => {
     const missing = selected.filter((m) => !m.supported_parameters.includes(name));
     const value = name === "temperature" ? temperature : name === "top_p" ? topP : maxTokens;
@@ -107,7 +100,6 @@ export default function App() {
   const paramsBlocked = temp.blocked || top.blocked || mt.blocked;
   const blockedParams = [temp, top, mt].filter((p) => p.blocked);
 
-  // "A and B" / "A, B, and C" - matches how the model chips read out names
   function joinNames(names: string[]): string {
     if (names.length <= 1) return names[0] ?? "";
     if (names.length === 2) return `${names[0]} and ${names[1]}`;
@@ -115,16 +107,14 @@ export default function App() {
   }
 
   const canRun =
-    selected.length > 0 && prompt.trim() !== "" && !running && !paramsBlocked && judgeId !== null;
+    selected.length >= 2 && prompt.trim() !== "" && !running && !paramsBlocked && judgeId !== null;
 
   const autoScroll = (modelId: string) => {
     const el = scrollRefs.current.get(modelId);
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  // auto-evaluate exactly once per run - fired when the stream settles, with
-  // the run_id captured from the opening `run` event. Fire-once on the
-  // backend, so an accidental repeat returns the cached verdict.
+  // evaluated once per run; the backend caches the verdict, so a repeat call costs nothing
   async function autoEvaluate(runId: string) {
     setEvaluating(true);
     setEvalNote(null);
@@ -134,12 +124,12 @@ export default function App() {
       const failed = Object.values(result.metrics).filter((m) => m.status === "inference_error");
       if (failed.length > 0) {
         setEvalNote(
-          `Partial evaluation - ${failed.map((m) => m.label).join(", ")} could not be scored` +
+          `Partial evaluation: ${failed.map((m) => m.label).join(", ")} could not be scored` +
             ` (${failed.map((m) => m.error ?? "judge error").join("; ")}). The overall is weight-averaged over the scored metrics.`,
         );
       }
     } catch (err) {
-      setEvalNote(`Evaluation failed - ${(err as Error).message} A fresh run is the only path.`);
+      setEvalNote(`Evaluation failed: ${(err as Error).message} Start a new run to try again.`);
     } finally {
       setEvaluating(false);
     }
@@ -152,7 +142,6 @@ export default function App() {
     setEvaluation(null);
     setEvalNote(null);
     runIdRef.current = null;
-    // fresh panes for this run; the grid keeps the new lineup right away
     setPanes(Object.fromEntries(selected.map((m) => [m.id, { status: "streaming", text: "" }])));
 
     const num = (s: string) => (s.trim() === "" ? undefined : Number(s));
@@ -190,7 +179,7 @@ export default function App() {
           },
           onError: (modelId, message) => {
             if (!modelId) {
-              // empty id = the whole run failed before any model streamed
+              // an empty id means the whole run failed before any model streamed
               setBanner(message);
               return;
             }
@@ -208,8 +197,6 @@ export default function App() {
       }
     } finally {
       setRunning(false);
-      // the stream has settled - the run is complete on the backend, so the
-      // single evaluate call fires now (exactly once per run)
       if (runIdRef.current) void autoEvaluate(runIdRef.current);
     }
   }
@@ -217,7 +204,6 @@ export default function App() {
 
   return (
     <div className="page-backdrop min-h-screen">
-      {/* top bar */}
       <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/85 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
@@ -233,11 +219,10 @@ export default function App() {
       <main className="mx-auto max-w-6xl px-6 pb-16">
         {loadError && (
           <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {loadError} - check that the backend is running on port 8000 and reload.
+            {loadError}. Check that the backend is running on port 8000 and reload.
           </div>
         )}
 
-        {/* prompt + params card */}
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
           <p className="section-title mb-3">Prompt</p>
           <textarea
@@ -253,7 +238,7 @@ export default function App() {
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             rows={2}
-            placeholder="Optional - sets the same persona or rules for every model."
+            placeholder="Optional. Sets the same persona or rules for every model."
             className="w-full resize-y rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm leading-6 outline-none transition-colors placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
           />
 
@@ -276,7 +261,7 @@ export default function App() {
                     className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600"
                   >
                     {label} has a value, but {joinNames(names)}{" "}
-                    {names.length === 1 ? "doesn't" : "don't"} support it - clear it or remove{" "}
+                    {names.length === 1 ? "doesn't" : "don't"} support it. Clear it or remove{" "}
                     {who} to run.
                   </p>
                 );
@@ -310,8 +295,8 @@ export default function App() {
               )}
             </button>
             <span className="text-xs text-slate-400">
-              {selected.length === 0
-                ? "Fill at least one slot to enable the run"
+              {selected.length < 2
+                ? "Pick at least two models to run."
                 : `${selected.length} of ${MAX_MODELS} slots filled`}
             </span>
           </div>
@@ -321,7 +306,6 @@ export default function App() {
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{banner}</div>
         )}
 
-        {/* results */}
         <section className="mt-6">
           <div className="mb-3 flex items-center justify-between">
             <p className="section-title">Results</p>
@@ -340,7 +324,7 @@ export default function App() {
             )}
           </div>
 
-          {/* judge banners - partial / failed / tie-break, no retry buttons */}
+          {/* no retry buttons: a failed evaluation needs a new run */}
           {evalNote && (
             <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs leading-5 text-amber-800">
               {evalNote}
@@ -348,11 +332,10 @@ export default function App() {
           )}
           {evaluation?.tie_break?.winner && (
             <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs leading-5 text-indigo-800">
-              Tie at the 0.15 band - decided by a masked head-to-head: {evaluation.tie_break.rationale}
+              Tie at the 0.15 band. Decided by a masked head-to-head: {evaluation.tie_break.rationale}
             </div>
           )}
-          {/* one card per slot - empty slots show the picker, filled slots show
-              the output (or an add-someone-here card before the first run) */}
+          {/* empty slots show the picker, filled slots show the output */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {slots.map((m, i) => {
               const entry = evaluation?.overall.find((o) => o.model_id === m?.id);
@@ -390,9 +373,7 @@ export default function App() {
                   isWinner={evaluation?.winner === m.id}
                   metrics={metrics}
                   evaluating={evaluating}
-                  onClear={
-                    Object.keys(panes).length === 0 ? () => setSlot(i, null) : undefined
-                  }
+                  onClear={locked ? undefined : () => removeModel(i)}
                 />
               );
             })}

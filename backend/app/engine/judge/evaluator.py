@@ -1,16 +1,8 @@
-"""A captured run gets judged one metric at a time, with responses shown under blind letters.
-
-Every judge call is comparative: it sees the user's prompt and all captured
-responses under blind letters (A/B/C - the model-id mapping stays on the
-server), and scores them on a single 1-5 metric. Scores normalize to 0-1,
-get combined with each metric's weight, and the top score wins - unless the
-top two finish within TIE_BAND, when one masked pairwise call breaks the
-tie. A judge call that fails validation twice is marked an inference error
-and its weight is re-normalized across the metrics that did come back.
-"""
+"""Judges a captured run one metric at a time, with answers under blind letters."""
 import asyncio
 import json
 import random
+import re
 
 from pydantic import ValidationError
 
@@ -22,11 +14,11 @@ from app.providers.registry import parse_composite
 
 TIE_BAND = 0.15  # top-two gap within this range goes to the pairwise tie-break
 RETRIES = 1  # one extra judge call per metric before declaring an inference error
-LETTERS = "ABC"  # enough for MAX_MODELS=3 - extend if the cap ever rises
+LETTERS = "ABC"  # one letter per model, up to MAX_MODELS=3
 
 
 class EvaluationError(Exception):
-    """Run-level failure - no verdict could be produced at all."""
+    """No verdict could be produced for the run."""
 
 
 class NotEnoughResponses(EvaluationError):
@@ -34,7 +26,7 @@ class NotEnoughResponses(EvaluationError):
 
 
 def _metric_schema() -> dict:
-    """OpenRouter json_schema response_format for one metric's verdict."""
+    """JSON schema response_format for one metric's verdict."""
     score_item = {
         "type": "object",
         "properties": {
@@ -61,7 +53,7 @@ def _metric_schema() -> dict:
 
 
 def _pairwise_schema() -> dict:
-    """OpenRouter json_schema response_format for the tie-break verdict."""
+    """JSON schema response_format for the tie-break verdict."""
     return {
         "type": "json_schema",
         "json_schema": {
@@ -80,10 +72,22 @@ def _pairwise_schema() -> dict:
     }
 
 
+def _extract_json(text: str) -> str:
+    """Pull the JSON object out of a fenced or prose-wrapped judge reply."""
+    stripped = text.strip()
+    fence = re.match(r"^```[\w-]*\s*(.*?)\s*```$", stripped, re.DOTALL)
+    if fence:
+        return fence.group(1)
+    start, end = stripped.find("{"), stripped.rfind("}")
+    if start != -1 and end > start:
+        return stripped[start:end + 1]
+    return stripped
+
+
 def _parse_metric(text: str, expected_letters: set[str]) -> MetricCallVerdict:
     """Strictly validate one metric's raw verdict JSON against the letters."""
     try:
-        data = json.loads(text)
+        data = json.loads(_extract_json(text))
     except json.JSONDecodeError as exc:
         raise ValueError("judge returned invalid JSON: %s" % exc)
     try:
@@ -103,13 +107,22 @@ def _parse_metric(text: str, expected_letters: set[str]) -> MetricCallVerdict:
 def _parse_pairwise(text: str) -> PairwiseVerdict:
     """Strictly validate the tie-break's raw verdict JSON."""
     try:
-        data = json.loads(text)
+        data = json.loads(_extract_json(text))
     except json.JSONDecodeError as exc:
         raise ValueError("judge returned invalid JSON: %s" % exc)
     try:
         return PairwiseVerdict.model_validate(data)
     except ValidationError as exc:
         raise ValueError("judge verdict failed schema validation: %s" % exc)
+
+
+async def _complete(adapter, model_id, user, system, params, schema):
+    """Call the judge, retrying once without temperature if the model rejects it."""
+    raw = await adapter.complete(model_id, user, system, params, schema)
+    if raw.error and params.temperature is not None and "temperature" in raw.error.lower():
+        params = SharedParams()
+        raw = await adapter.complete(model_id, user, system, params, schema)
+    return raw, params
 
 
 async def _call_metric(
@@ -125,7 +138,9 @@ async def _call_metric(
     schema = _metric_schema()
     last_error = None
     for _ in range(1 + RETRIES):
-        raw = await adapter.complete(parse_composite(record.judge_model)[1], user, system, params, schema)
+        raw, params = await _complete(
+            adapter, parse_composite(record.judge_model)[1], user, system, params, schema
+        )
         if raw.error:
             last_error = raw.error
             continue
@@ -150,7 +165,9 @@ async def _call_pairwise(
     schema = _pairwise_schema()
     last_error = None
     for _ in range(1 + RETRIES):
-        raw = await adapter.complete(parse_composite(record.judge_model)[1], user, system, params, schema)
+        raw, params = await _complete(
+            adapter, parse_composite(record.judge_model)[1], user, system, params, schema
+        )
         if raw.error:
             last_error = raw.error
             continue
@@ -161,21 +178,15 @@ async def _call_pairwise(
     return None, last_error
 
 
-async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
-    """Judge one captured run and return the evaluation payload.
-
-    Raises NotEnoughResponses when fewer than two models produced usable
-    text, and EvaluationError when every metric's judge call failed.
-    On success the payload is stored on the record and returned.
-    """
-    completed = sorted(
-        (r for r in record.results.values() if r.text and not r.error),
-        key=lambda r: r.model_id,
-    )
+async def evaluate_run(record, adapter: ProviderAdapter, seed: int | None = None) -> dict:
+    """Judge one captured run, store the payload on the record and return it."""
+    rng = random.Random(seed)
+    completed = [r for r in record.results.values() if r.text and not r.error]
+    rng.shuffle(completed)
     if len(completed) < 2:
         raise NotEnoughResponses(
-            "only %d of %d models returned a usable response - at least two "
-            "are needed for a comparison" % (len(completed), len(record.model_ids))
+            "Only %d of %d models returned a usable response. At least two "
+            "are needed for a comparison." % (len(completed), len(record.model_ids))
         )
 
     letters = {r.model_id: LETTERS[i] for i, r in enumerate(completed)}
@@ -185,11 +196,16 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
     params = SharedParams(temperature=0)
 
     results = await asyncio.gather(
-        *(_call_metric(adapter, record, m, responses, expected_letters, params) for m in METRICS)
+        *(
+            _call_metric(
+                adapter, record, m, rng.sample(responses, len(responses)), expected_letters, params
+            )
+            for m in METRICS
+        )
     )
 
     metric_payload = {}
-    usable = []  # metrics that scored - their weights share the overall score
+    usable = []  # metrics that scored; only their weights count toward the overall
     last_metric_error = None
     for metric, (verdict, error) in zip(METRICS, results):
         entry = {"label": metric.label, "weight": metric.weight}
@@ -213,7 +229,7 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
 
     if not usable:
         raise EvaluationError(
-            "every judge call failed for run %s - last error: %s"
+            "Every judge call failed for run %s. Last error: %s"
             % (record.run_id, last_metric_error)
         )
     total_weight = sum(m.weight for m in usable)
@@ -239,7 +255,7 @@ async def evaluate_run(record, adapter: ProviderAdapter) -> dict:
         top_id, runner_up_id = overall[0]["model_id"], overall[1]["model_id"]
         first_id, second_id = top_id, runner_up_id
         # randomize the presentation order so position bias can't decide the tie
-        if random.random() < 0.5:
+        if rng.random() < 0.5:
             first_id, second_id = second_id, first_id
         text_by_id = {r.model_id: r.text for r in completed}
         verdict, error = await _call_pairwise(

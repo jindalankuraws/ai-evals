@@ -1,9 +1,4 @@
-"""One prompt goes out to N models at once, and every stream comes back tagged with its model id.
-
-Every model gets the same prompt and the same shared params; each model's
-stream is consumed by its own task and tagged with the model id before being
-merged into one event flow, which the route relays to the browser.
-"""
+"""Sends one prompt to every model at once and tags each stream event with its model id."""
 import asyncio
 from dataclasses import dataclass
 from typing import AsyncIterator, Callable
@@ -27,14 +22,7 @@ async def fan_out(
     system_prompt: str,
     params: SharedParams,
 ) -> AsyncIterator[TaggedEvent]:
-    """Run all models concurrently and yield their events as they arrive.
-
-    ``adapter_for`` resolves each (possibly composite) model id to the adapter
-    that serves its provider, so one fan-out can mix providers freely. Events
-    interleave across models - whichever model produces a token first emits it
-    first. If the consumer stops early (browser gone), the still-running tasks
-    are cancelled.
-    """
+    """Run all models concurrently and yield their events as they arrive."""
     queue: asyncio.Queue = asyncio.Queue()
     running = len(model_ids)
 

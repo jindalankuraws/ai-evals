@@ -12,12 +12,7 @@ CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 class OpenRouterAdapter(ProviderAdapter):
-    """Streams one completion for one OpenRouter model.
-
-    Everything abnormal - bad key, unknown model, provider overload, network
-    drop - comes back as a StreamEvent of kind "error" so the caller can show
-    it in the UI instead of the whole request dying.
-    """
+    """Streams one completion for one OpenRouter model; failures come back as error events."""
 
     async def stream_completion(
         self,

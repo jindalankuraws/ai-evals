@@ -1,8 +1,4 @@
-"""Formatting helpers for streamed events.
-
-Every streaming endpoint sends its messages through these helpers so the
-frontend only ever has to parse one wire format.
-"""
+"""Formatting helpers for streamed events."""
 import json
 
 
