@@ -60,6 +60,9 @@ cp .env.example .env   # fill in at least one provider key
 uvicorn app.main:app --reload --port 8000
 ```
 
+Tests: run `pip install -r requirements-dev.txt`, then `python -m pytest` from `backend`.
+They use fake providers and make no network calls.
+
 ### Frontend
 
 ```bash
